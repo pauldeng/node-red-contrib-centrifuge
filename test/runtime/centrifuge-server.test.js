@@ -3,10 +3,62 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { EventEmitter } = require("node:events");
+const { runBounded } = require("../../lib/lifecycle");
 const { startNodeRed } = require("../helpers/node-red");
 const { startCentrifugo } = require("../helpers/centrifugo");
 
 const packageDir = path.resolve(__dirname, "../..");
+
+test("config-node status callbacks are isolated at registration and on connection transitions", async (t) => {
+  const srv = await startCentrifugo();
+  const events = new EventEmitter();
+  // eslint-disable-next-line prefer-const -- assigned after the cleanup hook that reads it is registered
+  let server;
+  t.after(async () => {
+    try {
+      if (server) {
+        const closed = Promise.withResolvers();
+        events.emit("close", false, closed.resolve);
+        await closed.promise;
+      }
+    } finally {
+      await srv.stop();
+    }
+  });
+  const warnings = [];
+  let Constructor;
+  require("../../nodes/centrifuge-server")({
+    nodes: {
+      registerType: (_type, ctor) => {
+        Constructor = ctor;
+      },
+      createNode(node) {
+        node.on = events.on.bind(events);
+        node.credentials = { secret: srv.secret };
+        node.debug = () => {};
+        node.warn = (message) => warnings.push(message);
+      },
+    },
+  });
+  server = new Constructor({ url: srv.url });
+  assert.doesNotThrow(() =>
+    server.register({ id: "broken" }, () => {
+      throw new Error("synthetic-secret");
+    }),
+  );
+  const connected = Promise.withResolvers();
+  const statuses = [];
+  server.register({ id: "sibling" }, (status) => {
+    statuses.push(status.text);
+    if (status.text === "connected") connected.resolve();
+  });
+  await runBounded(() => connected.promise, { timeout: 5000 });
+  assert.deepEqual(statuses, ["connecting", "connected"]);
+  assert.ok(warnings.length >= 2, "both registration and connected callback failures were handled");
+  for (const warning of warnings) assert.equal(warning, "centrifuge consumer callback failed");
+});
+
 const flow = (srv, over = {}) => [
   {
     id: "srv1",

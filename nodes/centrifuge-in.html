@@ -109,7 +109,7 @@
 
   **Mode** selects how this node subscribes.
 
-  : Subscribe to a channel : A client-side subscription to **Channel**, created (and torn down) by this node. Two `centrifuge in` nodes subscribed to the same channel on the same server share one underlying subscription; enabling **Also receive join/leave events** on either one upgrades both, with a brief gap in publications while the shared subscription is recreated. **Subscription token** adds a per-channel HMAC token (needs the server node's HMAC auth) for namespaces that require `subscribe_for_client` with a signed subscription.
+  : Subscribe to a channel : A client-side subscription to **Channel**, created (and torn down) by this node. Two `centrifuge in` nodes subscribed to the same channel on the same server share one underlying subscription. Join and leave events reach only the nodes that enable **Also receive join/leave events**; opting in later does not disturb the shared subscription. **Subscription token** adds a per-channel HMAC token (needs the server node's HMAC auth) for namespaces that require `subscribe_for_client` with a signed subscription.
   : Server-side subscriptions : Reads from subscriptions the server already granted this connection through the token's `channels` claim (the server node's **Channels** list). **Channel** here is an optional exact-match filter: leave it blank to receive every granted channel, or set it to receive only one. The status reads `awaiting server subscription` (yellow) while connected but not yet granted that channel.
 
   A channel cannot be both in the server node's **Channels** list and used by a subscribe-mode node: that combination is rejected as a conflicting subscription (the server already owns it server-side).

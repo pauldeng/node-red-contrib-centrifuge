@@ -2,22 +2,15 @@
 
 Node-RED nodes for Centrifugo over the official JavaScript client, WebSocket transport, JSON protocol. Every node that selects the same server configuration shares one connection.
 
-## Status
+## Install
 
-Not yet published to npm. Install from a checkout, inside your Node-RED user directory (`~/.node-red`):
-
-```
-npm install /path/to/node-red-contrib-centrifuge   # the checkout directory
-```
-
-or pack it and install the tarball:
+In your Node-RED user directory (`~/.node-red`), or through the palette manager once the package is listed in the Flow Library:
 
 ```
-npm pack /path/to/node-red-contrib-centrifuge
-npm install /path/to/pauldeng-node-red-contrib-centrifuge-*.tgz
+npm install @pauldeng/node-red-contrib-centrifuge
 ```
 
-Requirements: see `engines` and the `node-red` block in `package.json` for the supported Node.js and Node-RED versions, and Centrifugo v6 (tested against the pinned binary the test fixture downloads).
+From a checkout instead, run `npm install /path/to/node-red-contrib-centrifuge` in the same directory. Requirements: see `engines` and the `node-red` block in `package.json` for the supported Node.js and Node-RED versions, and Centrifugo v6 (tested against the pinned binary the test fixture downloads).
 
 ## Quick start
 
@@ -74,7 +67,7 @@ Receives publications from a Centrifugo channel. One output, no input.
 
 **Mode** selects how the node subscribes:
 
-- `subscribe` — a client-side subscription to **Channel**, created and torn down by this node. Two `centrifuge in` nodes subscribed to the same channel on the same server share one underlying subscription. Enabling **Also receive join/leave events** (`joinLeave`) on either node upgrades both (the union of what all sharing nodes asked for), with a brief gap in publications while the shared subscription is recreated. A **subscription token** (`subscriptionAuth: hmac`) adds a per-channel HMAC token, for namespaces that require a signed subscription; it needs HMAC auth on the server node.
+- `subscribe` — a client-side subscription to **Channel**, created and torn down by this node. Two `centrifuge in` nodes subscribed to the same channel on the same server share one underlying subscription. Join and leave events reach only the nodes that enable **Also receive join/leave events**; a node opting in later does not disturb the shared subscription. A **subscription token** (`subscriptionAuth: hmac`) adds a per-channel HMAC token, for namespaces that require a signed subscription; it needs HMAC auth on the server node.
 - `server` — reads from subscriptions the server already granted this connection through the server node's **Channels** list. **Channel** here is an optional exact-match filter: blank receives every granted channel, set receives only one. Status shows `awaiting server subscription` (yellow) while connected but not yet granted that channel.
 
 A channel cannot be both in the server node's **Channels** list and used by a `subscribe`-mode node on the same server: that combination is rejected as a conflicting subscription.
@@ -95,7 +88,7 @@ Payload rules: objects are JSON-encoded exactly as `JSON.stringify` would (Dates
 
 Output: `msg.centrifuge = { action: "publish", channel }`, replacing any previous `msg.centrifuge`; all other message properties are preserved.
 
-There is no offline queue: while the shared connection is reconnecting, a publish waits at most the server node's `timeout` before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Acknowledgement means the server accepted the publication, not that any subscriber received it — a command that times out may still have been delivered, and concurrent inputs may complete out of order.
+There is no offline queue: while the shared connection is reconnecting, a publish waits at most the server node's `timeout` before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Nothing caps how many publishes wait at once, so during a reconnect the node holds roughly input rate × `timeout` messages in memory; rate-limit bursty flows with a Delay node upstream. Acknowledgement means the server accepted the publication, not that any subscriber received it — a command that times out may still have been delivered, and concurrent inputs may complete out of order.
 
 Commands larger than the server node's `maxMessageSize` are refused locally (a size preflight) with `INVALID_MESSAGE`, before anything is sent.
 

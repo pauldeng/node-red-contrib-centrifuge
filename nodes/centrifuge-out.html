@@ -61,7 +61,7 @@
 
   Publishing on a channel requires `allow_publish_for_client` or `allow_publish_for_subscriber` on its namespace; otherwise the server rejects it with `PERMISSION_DENIED`.
 
-  There is no offline queue: while the shared connection is reconnecting, a publish waits at most the server node's Timeout before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Commands larger than the server node's Max message are refused locally with `INVALID_MESSAGE`, because sending them would make the server close the shared connection.
+  There is no offline queue: while the shared connection is reconnecting, a publish waits at most the server node's Timeout before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Waiting publishes are not capped: during a reconnect the node holds about input rate × Timeout messages in memory, so rate-limit bursty flows with a Delay node upstream. Commands larger than the server node's Max message are refused locally with `INVALID_MESSAGE`, because sending them would make the server close the shared connection.
 
   Acknowledgement means the server accepted the publication, not that any subscriber received it. A command that times out may still have been delivered. Concurrent inputs may complete out of order. Pending inputs cancelled by this node closing settle quietly, without output; delivery after dispatch can still be unknown.
 

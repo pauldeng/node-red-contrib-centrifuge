@@ -11,6 +11,7 @@ This is the shared repository guide for any coding agent. Read linked documents 
 - For runtime or ownership changes, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - For runtime/editor conventions, documentation or packaging changes, read [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 - For setup, test selection, fixtures or CI changes, read [docs/TESTING.md](docs/TESTING.md).
+- For versioning and publishing, read [docs/RELEASE.md](docs/RELEASE.md); publishing is a maintainer action, never automated from a session.
 - [package.json](package.json) and its lockfile define scripts, supported versions and exact dependency pins. Verify documentation against the owning code/tests when they disagree; report the discrepancy and correct it within the task's scope.
 
 ## Verify the change

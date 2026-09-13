@@ -328,3 +328,42 @@ test("an acknowledgement racing close settles quietly once and emits no output",
     "new input after close still fails",
   );
 });
+
+test("a throwing consumer neither starves its siblings nor escapes into the SDK emitter", () => {
+  const warnings = [];
+  const conn = createConnection({ url: "ws://localhost/", auth: "none", log: { warn: (m) => warnings.push(m) } });
+  try {
+    const seen = [];
+    conn.subscribe("news", {
+      onEvent: () => {
+        throw new Error("consumer bug secret-token");
+      },
+    });
+    conn.subscribe("news", { onEvent: (ctx) => seen.push(ctx.data) });
+    const sub = conn.client.getSubscription("news");
+    assert.doesNotThrow(() => sub.emit("publication", { channel: "news", data: 1 }));
+    assert.deepEqual(seen, [1], "the sibling still received the publication");
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /consumer callback failed/);
+    assert.doesNotMatch(warnings[0], /secret-token|consumer bug/);
+    assert.doesNotThrow(() => conn.client.emit("connected", {}));
+  } finally {
+    conn.close();
+  }
+});
+
+test("runBounded returns a value that resolved before abort even if the clock passed the deadline meanwhile", async () => {
+  const realNow = performance.now;
+  try {
+    const result = await runBounded(
+      async () => {
+        performance.now = () => realNow.call(performance) + 3_600_000; // the loop was busy; the deadline is "past"
+        return "acknowledged";
+      },
+      { timeout: 50 },
+    );
+    assert.equal(result, "acknowledged");
+  } finally {
+    performance.now = realNow;
+  }
+});

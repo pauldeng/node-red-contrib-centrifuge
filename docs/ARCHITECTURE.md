@@ -19,7 +19,7 @@ Read this for connection, subscription, publish or lifecycle changes. User-facin
 
 - A valid config creates its SDK client immediately; the first registered consumer starts the connection. Removing the last consumer does not disconnect it. The config node owns it until close.
 - Consumers use the config node's `register`/`deregister`, `subscribe(channel, consumer, options)`, `onServerSide(consumer)` and `run(work, { signal, prepare })`. Subscription methods return disposers. Keep direct SDK access inside the connection owner and the work callback passed to `run`.
-- Consumers sharing a channel use one SDK subscription. `joinLeave` is unioned and events are filtered per consumer; upgrading options recreates the subscription with a brief delivery gap. Server-side/client-side overlap is `CONFIG_CONFLICT`.
+- Consumers sharing a channel use one SDK subscription. The subscription always requests join/leave (the server only sends them where the namespace enables them) and events are filtered per consumer, so opting in never recreates the subscription or drops publications. Server-side/client-side overlap is `CONFIG_CONFLICT`.
 - Connection close aborts pending work, removes owned client listeners, calls `disconnect()`, then destroys subscriptions so removal sends no unsubscribe commands. It does not await a network acknowledgement. Keep the SDK's default `error` listener; do not use `removeAllListeners()`.
 - Output-node close aborts its inputs, waits for their local settlement and deregisters. Inputs cancelled by their own node closing settle quietly; late completion must not send a message. Partial redeploy must leave sibling consumers and their shared connection working.
 
@@ -49,3 +49,4 @@ When changing a dependency pin or the behaviour below, inspect the installed dep
 - Retryable connection loss appears as `connecting`; `disconnected` is terminal. The wrapper must avoid the SDK's readiness timeout when the connection is already terminal.
 - Native Node.js `WebSocket` supplies the transport. Private CAs use `NODE_EXTRA_CA_CERTS` at process startup; there are no per-config-node TLS options.
 - SDK debug-flag access to `localStorage` may produce a Node.js experimental-webstorage warning depending on the runtime. Check failures separately from this warning.
+- `disconnect()` does not cancel the SDK's pending connect-command timer; one timer handle per connect/close cycle lives on until the configured `timeout` elapses, then clears itself. Bounded, so redeploy loops never hold more than one timeout window of handles.

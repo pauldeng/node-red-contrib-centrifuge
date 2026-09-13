@@ -1,0 +1,62 @@
+name: Release
+# Publishes the tagged version to npm through trusted publishing (OIDC). No npm token exists anywhere in this
+# repository. The trusted publisher registered on npmjs.com must name exactly: owner pauldeng, repository
+# node-red-contrib-centrifuge, workflow release.yml, no environment. Renaming this file breaks publishing.
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # escape hatch: publishes whatever version the selected ref carries, after the same gates
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing and provenance
+concurrency: { group: release, cancel-in-progress: false }
+jobs:
+  publish:
+    name: verify, pack, publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with: { node-version: "24", cache: npm, registry-url: "https://registry.npmjs.org" }
+      - run: npm install -g npm@latest # trusted publishing needs npm 11.5.1 or newer
+      - run: npm ci
+      - name: tag must equal package.json version
+        if: github.event_name == 'release'
+        env: { TAG: "${{ github.event.release.tag_name }}" }
+        run: test "v$(node -p 'require("./package.json").version')" = "$TAG"
+      - name: version must not be on the registry yet
+        run: |
+          NAME=$(node -p 'require("./package.json").name'); VERSION=$(node -p 'require("./package.json").version')
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then echo "$NAME@$VERSION already published"; exit 1; fi
+      - name: CHANGELOG has a section for this version
+        run: grep -q "^## \[$(node -p 'require("./package.json").version')\]" CHANGELOG.md
+      - uses: actions/cache@v5
+        with: { path: .cache/centrifugo, key: "centrifugo-6.9.4-${{ runner.os }}-${{ runner.arch }}" }
+      - run: npm run lint && npm run format:check
+      - run: npm test # static gates, unit, package contract, real Node-RED + real Centrifugo runtime
+        timeout-minutes: 8
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+        timeout-minutes: 6
+      - run: npm audit --omit=dev
+      - run: npm run check:release
+      - name: packed tarball installs into a clean Node-RED and registers every node
+        run: |
+          set -e
+          TGZ=$(npm pack --json --pack-destination "$RUNNER_TEMP" | node -e 'const o=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log((Array.isArray(o)?o[0]:Object.values(o)[0]).filename)')
+          mkdir -p "$RUNNER_TEMP/userdir" && cd "$RUNNER_TEMP/userdir" && npm init -y >/dev/null && npm install --no-fund --no-audit "$RUNNER_TEMP/$TGZ"
+          node "$GITHUB_WORKSPACE/scripts/check-installed-package.js" "$RUNNER_TEMP/userdir"
+      - run: npm publish --access public --provenance
+      - name: verify from the registry, not the workflow log
+        run: |
+          NAME=$(node -p 'require("./package.json").name'); VERSION=$(node -p 'require("./package.json").version')
+          for i in 1 2 3 4 5 6; do
+            if npm view "$NAME@$VERSION" version dist.tarball dist.attestations --json > "$RUNNER_TEMP/published.json" &&
+              node scripts/check-published-package.js "$RUNNER_TEMP/published.json"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Registry did not confirm the version, tarball and provenance metadata" >&2
+          exit 1

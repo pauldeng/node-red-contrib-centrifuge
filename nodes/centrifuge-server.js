@@ -10,6 +10,14 @@ module.exports = function (RED) {
     RED.nodes.createNode(this, config);
     const node = this;
     const users = new Map(); // consumer node id -> onStatus
+    const notify = (onStatus, status) => {
+      try {
+        onStatus(status);
+      } catch {
+        // Isolate individual consumers, including the initial status delivered during registration.
+        node.warn("centrifuge consumer callback failed");
+      }
+    };
     let closing = false;
     let conn = null;
     let failure = null;
@@ -27,7 +35,7 @@ module.exports = function (RED) {
         log: { debug: (m) => node.debug(m), warn: (m) => node.warn(m) },
       });
       conn.onStatus((status) => {
-        for (const onStatus of users.values()) onStatus(status);
+        for (const onStatus of users.values()) notify(onStatus, status);
       });
     } catch (err) {
       failure = err; // consumers render "invalid config" and report it; inputs fail with INVALID_CONFIG
@@ -42,7 +50,7 @@ module.exports = function (RED) {
 
     node.register = (user, onStatus) => {
       users.set(user.id, onStatus);
-      onStatus(current());
+      notify(onStatus, current());
       conn?.connect(); // the first consumer starts the connection; it lives until this node closes
     };
     node.deregister = (user) => {

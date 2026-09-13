@@ -168,7 +168,7 @@ test("server-side subscriptions: channels claim, filter status, conflict with a 
   );
 });
 
-test("joinLeave: union across consumers with per-consumer filtering; upgrade recreates the subscription", async (t) => {
+test("joinLeave: one shared subscription, per-consumer filtering, no recreate when a consumer opts in", async (t) => {
   const srv = await startCentrifugo();
   t.after(() => srv.stop());
   const conn = createConnection({ url: srv.url, secret: srv.secret });
@@ -181,8 +181,7 @@ test("joinLeave: union across consumers with per-consumer filtering; upgrade rec
   const firstSub = conn.client.getSubscription("room");
   conn.subscribe("room", watcher, { joinLeave: true });
   await watcher.status.until((s) => s.text === "subscribed");
-  assert.notEqual(conn.client.getSubscription("room"), firstSub, "upgrade recreated the SDK subscription");
-  assert.equal(conn.client.getSubscription("room").options?.joinLeave ?? true, true);
+  assert.equal(conn.client.getSubscription("room"), firstSub, "opting in must not recreate the shared subscription");
 
   const other = new Centrifuge(srv.url, { token: connectionToken({ secret: srv.secret, sub: "other" }) });
   t.after(() => other.disconnect());
