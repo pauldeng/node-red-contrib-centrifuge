@@ -1,0 +1,180 @@
+<script type="text/javascript">
+  (function () {
+    const isInt = (v, min, max) =>
+      ["string", "number"].includes(typeof v) &&
+      String(v).trim() !== "" &&
+      Number.isInteger(Number(v)) &&
+      Number(v) >= min &&
+      Number(v) <= max;
+    RED.nodes.registerType("centrifuge-server", {
+      category: "config",
+      defaults: {
+        name: { value: "" },
+        url: {
+          value: "ws://localhost:8000/connection/websocket",
+          required: true,
+          validate: function (v) {
+            try {
+              if (typeof v !== "string") return false;
+              const u = new URL(v);
+              return (
+                ["ws:", "wss:"].includes(u.protocol) &&
+                !!u.hostname &&
+                !u.username &&
+                !u.password &&
+                !u.href.includes("#")
+              );
+            } catch (e) {
+              return false;
+            }
+          },
+        },
+        auth: { value: "hmac", validate: (v) => ["hmac", "token", "none"].includes(v) },
+        user: { value: "node-red" },
+        channels: { value: "" },
+        ttl: {
+          value: 3600,
+          validate: function (v) {
+            const auth = $("#node-config-input-auth").length ? $("#node-config-input-auth").val() : this.auth;
+            return auth !== "hmac" || isInt(v, 60, 86400);
+          },
+        },
+        timeout: { value: 5000, validate: (v) => isInt(v, 100, 60000) },
+        maxMessageSize: { value: 65536, validate: (v) => isInt(v, 1, Number.MAX_SAFE_INTEGER) },
+      },
+      credentials: {
+        token: { type: "password" },
+        secret: { type: "password" },
+      },
+      label: function () {
+        if (this.name) return this.name;
+        try {
+          return new URL(this.url).host;
+        } catch (e) {
+          return "centrifuge server";
+        }
+      },
+      oneditprepare: function () {
+        const dialog = $("#node-config-input-auth").closest("form, .red-ui-tray-body, body");
+        const show = () => {
+          const auth = $("#node-config-input-auth").val();
+          dialog.find(".centrifuge-auth").hide();
+          dialog.find(".centrifuge-auth-" + auth).show();
+          $("#node-config-input-ttl").trigger("change");
+        };
+        $("#node-config-input-auth").on("change", show);
+        show();
+      },
+    });
+  })();
+</script>
+
+<script type="text/html" data-template-name="centrifuge-server">
+  <div class="centrifuge-dialog">
+    <div class="form-row">
+      <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+      <input type="text" id="node-config-input-name" placeholder="Name" />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-url"><i class="fa fa-globe"></i> URL</label>
+      <input type="text" id="node-config-input-url" placeholder="ws://localhost:8000/connection/websocket" />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-auth"><i class="fa fa-id-card-o"></i> Auth</label>
+      <select id="node-config-input-auth" style="width: 70%">
+        <option value="hmac">HMAC secret (sign tokens in Node-RED)</option>
+        <option value="token">Static JWT</option>
+        <option value="none">None (anonymous)</option>
+      </select>
+    </div>
+    <div class="form-row centrifuge-auth centrifuge-auth-hmac">
+      <label for="node-config-input-secret"><i class="fa fa-key"></i> Secret</label>
+      <input type="password" id="node-config-input-secret" autocomplete="new-password" />
+    </div>
+    <div class="form-row centrifuge-auth centrifuge-auth-hmac">
+      <label for="node-config-input-user"><i class="fa fa-user"></i> User</label>
+      <input type="text" id="node-config-input-user" placeholder="node-red" />
+    </div>
+    <div class="form-row centrifuge-auth centrifuge-auth-hmac">
+      <label for="node-config-input-channels" style="vertical-align: top"><i class="fa fa-list"></i> Channels</label>
+      <textarea
+        id="node-config-input-channels"
+        rows="3"
+        style="width: 70%; font-family: monospace"
+        placeholder="one channel per line"
+      ></textarea>
+    </div>
+    <div class="form-row centrifuge-auth centrifuge-auth-hmac">
+      <label for="node-config-input-ttl"><i class="fa fa-clock-o"></i> Token TTL</label>
+      <input
+        type="number"
+        id="node-config-input-ttl"
+        min="60"
+        max="86400"
+        step="1"
+        placeholder="3600"
+        style="width: 8em"
+      />
+      <span>seconds (60–86400)</span>
+    </div>
+    <div class="form-row centrifuge-auth centrifuge-auth-token">
+      <label for="node-config-input-token"><i class="fa fa-key"></i> Token</label>
+      <input type="password" id="node-config-input-token" autocomplete="new-password" />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-timeout"><i class="fa fa-hourglass-half"></i> Timeout</label>
+      <input
+        type="number"
+        id="node-config-input-timeout"
+        min="100"
+        max="60000"
+        step="1"
+        placeholder="5000"
+        style="width: 8em"
+      />
+      <span>ms (100–60000)</span>
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-maxMessageSize"><i class="fa fa-arrows-h"></i> Max message</label>
+      <input
+        type="number"
+        id="node-config-input-maxMessageSize"
+        min="1"
+        step="1"
+        placeholder="65536"
+        style="width: 8em"
+      />
+      <span>bytes, at most the server limit</span>
+    </div>
+    <div class="form-tips">Secrets are stored in Node-RED credentials and never exported with the flow.</div>
+  </div>
+</script>
+
+<script type="text/markdown" data-help-name="centrifuge-server">
+  Connection to a Centrifugo server shared by every Centrifuge node that selects it. One WebSocket connection is opened when the first node using it is deployed and kept until this configuration is redeployed or removed.
+
+  ### Details
+
+  **URL** is the bidirectional WebSocket endpoint, normally `ws://host:8000/connection/websocket` or `wss://` behind TLS. Credentials in the URL are rejected; query parameters are allowed. Environment variables can be used with `${NAME}`.
+
+  **Auth** selects how the connection token is obtained.
+
+  : HMAC secret : Node-RED holds the server's `client.token.hmac_secret_key` and signs HS256 tokens itself for **User**, renewing them before **Token TTL** expires. **Channels** (one per line) become the token's `channels` claim: the server subscribes the connection to them, and `centrifuge in` nodes in server mode receive their publications. Holding the secret lets Node-RED mint tokens for any user and channel, so use this mode only where Node-RED is trusted like your backend.
+  : Static JWT : A token you generated elsewhere. Nothing can refresh it: when it expires the connection ends with `unauthorized` and stays down until you redeploy with a new token. Use HMAC mode when automatic renewal is needed.
+  : None : Connect without a token. The server must set `client.allow_anonymous_connect_without_token`.
+
+  **Timeout** bounds each publish, including channel evaluation, connection readiness and acknowledgement. It also sets the SDK timeout per phase. There is no offline queue; a publish while reconnecting fails after the timeout with `TIMEOUT`.
+
+  **Max message** must not exceed the server's `websocket.message_size_limit` (default 65536). An oversized command makes the server close the shared connection permanently, so the output node refuses larger publish commands with `INVALID_MESSAGE`. SDK-generated connect and subscribe commands are not preflighted; keep token channel lists within the server limit.
+
+  Status shown on the nodes: `connecting` (yellow) while the client connects or retries, `connected` (green), and a red `disconnected: known reason (code)` when the server or the token ends the connection permanently. A red status is logged once; fix the cause and redeploy.
+
+  > [!NOTE]
+  > Centrifugo recommends publishing from backends through its HTTP API. Publishing from `centrifuge out` requires `allow_publish_for_client` (or `allow_publish_for_subscriber`) on the channel namespace; otherwise the server answers `permission denied (103)`.
+
+  ### References
+
+  - [Centrifugo authentication](https://centrifugal.dev/docs/server/authentication) - connection token claims
+  - [Channels and namespaces](https://centrifugal.dev/docs/server/channels) - permissions such as `allow_publish_for_client`
+  - [Client SDK API](https://centrifugal.dev/docs/transports/client_api) - states, reconnect and code ranges
+</script>

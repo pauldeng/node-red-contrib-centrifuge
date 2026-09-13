@@ -1,0 +1,128 @@
+<script type="text/javascript">
+  RED.nodes.registerType("centrifuge-in", {
+    category: "centrifuge",
+    color: "#c0d8dc",
+    icon: "centrifuge.svg",
+    inputs: 0,
+    outputs: 1,
+    outputLabels: "publication",
+    defaults: {
+      name: { value: "" },
+      server: { value: "", type: "centrifuge-server" },
+      mode: { value: "subscribe", validate: (v) => ["subscribe", "server"].includes(v) },
+      channel: {
+        value: "",
+        validate: function (v) {
+          const mode = $("#node-input-mode").length ? $("#node-input-mode").val() : this.mode;
+          return typeof v === "string" && (v.trim() !== "" || (mode === "server" && v === ""));
+        },
+      },
+      joinLeave: { value: false, validate: (v) => typeof v === "boolean" },
+      subscriptionAuth: {
+        value: "none",
+        validate: function (v) {
+          const mode = $("#node-input-mode").length ? $("#node-input-mode").val() : this.mode;
+          return mode === "server" || ["none", "hmac"].includes(v);
+        },
+      },
+    },
+    label: function () {
+      if (this.name) return this.name;
+      if (this.mode === "server") return this.channel ? `server: ${this.channel}` : "server subscriptions";
+      return this.channel || "centrifuge in";
+    },
+    paletteLabel: "centrifuge in",
+    oneditprepare: function () {
+      const modeSelect = $("#node-input-mode");
+      const channelLabel = $("#centrifuge-in-channel-label");
+      const channelHint = $("#centrifuge-in-channel-hint");
+      const authRow = $("#centrifuge-in-row-auth");
+      const update = () => {
+        const mode = modeSelect.val();
+        if (mode === "server") {
+          channelLabel.text("Filter");
+          channelHint.show();
+          authRow.hide();
+        } else {
+          channelLabel.text("Channel");
+          channelHint.hide();
+          authRow.show();
+        }
+        $("#node-input-channel, #node-input-subscriptionAuth").trigger("change");
+      };
+      modeSelect.on("change", update);
+      update();
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="centrifuge-in">
+  <div class="form-row">
+    <label for="node-input-server"><i class="fa fa-server"></i> Server</label>
+    <input type="text" id="node-input-server" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-mode"><i class="fa fa-sitemap"></i> Mode</label>
+    <select id="node-input-mode" style="width: 70%">
+      <option value="subscribe">Subscribe to a channel</option>
+      <option value="server">Server-side subscriptions</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-channel"
+      ><i class="fa fa-hashtag"></i> <span id="centrifuge-in-channel-label">Channel</span></label
+    >
+    <input type="text" id="node-input-channel" placeholder="channel" />
+  </div>
+  <div class="form-tips" id="centrifuge-in-channel-hint">
+    Leave blank to receive every server-side subscription granted to this connection; set it to receive only one
+    channel.
+  </div>
+  <div class="form-row">
+    <label for="node-input-joinLeave"><i class="fa fa-user-o"></i></label>
+    <input type="checkbox" id="node-input-joinLeave" style="width: auto; vertical-align: top" />
+    <label for="node-input-joinLeave" style="width: auto">Also receive join/leave events</label>
+  </div>
+  <div class="form-row" id="centrifuge-in-row-auth">
+    <label for="node-input-subscriptionAuth"><i class="fa fa-key"></i> Subscription token</label>
+    <select id="node-input-subscriptionAuth" style="width: 70%">
+      <option value="none">None</option>
+      <option value="hmac">HMAC secret (from the server node)</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/markdown" data-help-name="centrifuge-in">
+  Receives publications from a Centrifugo channel: one output, no input.
+
+  ### Outputs
+
+  : topic (string) : The channel the message came from.
+  : payload (any) : The publication data as received (any JSON value, including `null`), or the `ClientInfo` object for a join/leave event.
+  : centrifuge (object) : `{ event, channel, offset?, tags?, info? }`. `event` is `publication`, `join` or `leave`; `offset` and `tags` are omitted when the server did not send them (an offset of `0` is kept); `info` is present for join/leave and for a publication the server tagged with sender info.
+
+  ### Details
+
+  **Mode** selects how this node subscribes.
+
+  : Subscribe to a channel : A client-side subscription to **Channel**, created (and torn down) by this node. Two `centrifuge in` nodes subscribed to the same channel on the same server share one underlying subscription; enabling **Also receive join/leave events** on either one upgrades both, with a brief gap in publications while the shared subscription is recreated. **Subscription token** adds a per-channel HMAC token (needs the server node's HMAC auth) for namespaces that require `subscribe_for_client` with a signed subscription.
+  : Server-side subscriptions : Reads from subscriptions the server already granted this connection through the token's `channels` claim (the server node's **Channels** list). **Channel** here is an optional exact-match filter: leave it blank to receive every granted channel, or set it to receive only one. The status reads `awaiting server subscription` (yellow) while connected but not yet granted that channel.
+
+  A channel cannot be both in the server node's **Channels** list and used by a subscribe-mode node: that combination is rejected as a conflicting subscription (the server already owns it server-side).
+
+  A subscription the server refuses shows `unsubscribed: permission denied (103)` and is logged once; it does not retry.
+
+  There is no delivery guarantee across a Node-RED restart or a redeploy that drops the connection: the underlying SDK only recovers missed publications within one running process, and only when the server's namespace has recovery enabled. There is no backpressure; a slow flow downstream of this node still receives every event as fast as the server sends it.
+
+  > [!NOTE]
+  > Join/leave events are only delivered to nodes that enabled **Also receive join/leave events**; the server may still track presence for the channel regardless.
+
+  ### References
+
+  - [Centrifugo channels](https://centrifugal.dev/docs/server/channels) - namespaces and permissions
+  - [Server-side subscriptions](https://centrifugal.dev/docs/transports/client_api#server-side-subscriptions) - the `channels` connection claim
+</script>

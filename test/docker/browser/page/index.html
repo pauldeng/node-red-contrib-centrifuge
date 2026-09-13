@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>centrifuge-js e2e page</title>
+  </head>
+  <body>
+    <script src="./centrifuge.js"></script>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const token = params.get("token");
+      const url = params.get("url");
+      const channel = params.get("channel");
+
+      window.received = [];
+      window.subscribed = false;
+
+      const client = new Centrifuge(url, { token });
+      const sub = client.newSubscription(channel);
+      sub.on("publication", (ctx) => window.received.push(ctx.data));
+      sub.on("subscribed", () => {
+        window.subscribed = true;
+      });
+      sub.on("unsubscribed", () => {
+        window.subscribed = false;
+      });
+
+      window.publish = (data) => sub.publish(data);
+      window.state = () => client.state;
+
+      sub.subscribe();
+      client.connect();
+    </script>
+  </body>
+</html>

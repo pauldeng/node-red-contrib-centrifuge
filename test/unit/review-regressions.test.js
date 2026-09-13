@@ -1,0 +1,330 @@
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { EventEmitter, once } = require("node:events");
+const { setImmediate: nextTurn } = require("node:timers/promises");
+const { prepareCommand } = require("../../lib/payload");
+const { fromSdkError, coded } = require("../../lib/errors");
+const { STATUS } = require("../../lib/status");
+const { validate, createConnection } = require("../../lib/connection");
+const { runBounded } = require("../../lib/lifecycle");
+
+function makeNode(type, config, server, evaluator = (_v, _t, _n, msg, cb) => cb(null, msg.topic)) {
+  let Constructor;
+  const RED = {
+    nodes: {
+      registerType: (_type, ctor) => {
+        Constructor = ctor;
+      },
+      getNode: () => server,
+      createNode(node) {
+        const events = new EventEmitter();
+        node.id = "test-node";
+        node.on = events.on.bind(events);
+        node.emit = events.emit.bind(events);
+        node.statuses = [];
+        node.errors = [];
+        node.status = (status) => node.statuses.push(status);
+        node.error = (err) => node.errors.push(err);
+      },
+    },
+    util: { evaluateNodeProperty: evaluator, cloneMessage: (msg) => structuredClone(msg) },
+  };
+  require(`../../nodes/${type}`)(RED);
+  return new Constructor(config);
+}
+const stubServer = () => ({
+  timeout: 50,
+  maxMessageSize: 65536,
+  calls: 0,
+  register(_node, render) {
+    this.render = render;
+    render(STATUS.connected);
+  },
+  deregister() {},
+  async run(work, { signal, prepare } = {}) {
+    return runBounded(
+      async (_signal, check) => {
+        const data = await prepare(check);
+        check();
+        return work(
+          {
+            publish: async () => {
+              this.calls++;
+              this.entered?.resolve();
+              return this.ack?.promise;
+            },
+          },
+          data,
+        );
+      },
+      { signal, timeout: this.timeout },
+    );
+  },
+});
+const input = (node, msg) => {
+  const result = Promise.withResolvers();
+  const sent = [];
+  const errors = [];
+  node.emit(
+    "input",
+    msg,
+    (out) => sent.push(out),
+    (err) => {
+      errors.push(err);
+      result.resolve(err);
+    },
+  );
+  return { result: result.promise, sent, errors };
+};
+
+test("deadline covers a stalled evaluator, and a late result never publishes", async () => {
+  const server = stubServer();
+  let callback;
+  const node = makeNode(
+    "centrifuge-out",
+    { channel: "target", channelType: "global" },
+    server,
+    (_v, _t, _n, _m, cb) => {
+      callback = cb;
+    },
+  );
+  const op = input(node, { payload: "hello" });
+  const err = await runBounded(() => op.result, { timeout: 300 });
+  assert.equal(err.code, "TIMEOUT");
+  callback(null, "news");
+  await nextTurn();
+  assert.equal(server.calls, 0);
+  assert.equal(op.errors.length, 1);
+  assert.equal(op.sent.length, 0);
+});
+
+test("close cancels a stalled evaluator without waiting for its callback", async () => {
+  const server = stubServer();
+  let callback;
+  const node = makeNode(
+    "centrifuge-out",
+    { channel: "target", channelType: "global" },
+    server,
+    (_v, _t, _n, _m, cb) => {
+      callback = cb;
+    },
+  );
+  const op = input(node, { payload: "hello" });
+  const closed = Promise.withResolvers();
+  node.emit("close", false, closed.resolve);
+  await runBounded(() => closed.promise, { timeout: 300 });
+  assert.equal(await op.result, undefined);
+  callback(null, "news");
+  await nextTurn();
+  assert.equal(server.calls, 0);
+  assert.equal(op.errors.length, 1);
+});
+
+test("input configuration failure is not overwritten by connection status", () => {
+  const server = stubServer();
+  server.subscribe = () => {
+    throw coded("CONFIG_CONFLICT");
+  };
+  const node = makeNode("centrifuge-in", { mode: "subscribe", channel: "news" }, server);
+  server.render?.(STATUS.connected);
+  assert.equal(node.statuses.at(-1).fill, "red");
+});
+
+test("invalid input modes and channel selectors fail without I/O", async () => {
+  const server = stubServer();
+  let subscriptions = 0;
+  server.subscribe = () => {
+    subscriptions++;
+    return () => {};
+  };
+  const node = makeNode("centrifuge-in", { mode: "typo", channel: "news" }, server);
+  assert.equal(subscriptions, 0);
+  assert.equal(node.statuses.at(-1).fill, "red");
+  const out = makeNode("centrifuge-out", { channel: "news", channelType: "typo" }, server);
+  assert.equal((await input(out, { topic: "news", payload: 1 }).result).code, "INVALID_CONFIG");
+  const whitespace = makeNode("centrifuge-out", { channel: "topic", channelType: "msg" }, server);
+  assert.equal((await input(whitespace, { topic: "   ", payload: 1 }).result).code, "INVALID_MESSAGE");
+  assert.equal(server.calls, 0);
+});
+
+test("serialization reads getters once, rejects binary in classes and hook results, and sanitizes throws", () => {
+  let reads = 0;
+  const data = {
+    get value() {
+      return ++reads;
+    },
+  };
+  assert.deepEqual(prepareCommand("publish", { channel: "news" }, data, 65536).data, { value: 1 });
+  assert.equal(reads, 1);
+  class Binary {
+    constructor() {
+      this.data = Buffer.from("secret");
+    }
+  }
+  for (const value of [
+    new Binary(),
+    { toJSON: () => ({ data: new Uint8Array(1) }) },
+    { toJSON: () => Buffer.from("x") },
+  ]) {
+    assert.throws(
+      () => prepareCommand("publish", { channel: "news" }, value, 65536),
+      (e) => e.code === "INVALID_MESSAGE",
+    );
+  }
+  assert.throws(
+    () =>
+      prepareCommand(
+        "publish",
+        {},
+        {
+          get value() {
+            throw Error("secret-token");
+          },
+        },
+        65536,
+      ),
+    (e) => e.code === "INVALID_MESSAGE" && !e.message.includes("secret-token"),
+  );
+});
+
+test("diagnostics never forward external reason strings or inherited error codes", () => {
+  for (const e of [
+    { code: 103, message: "secret-token" },
+    Error("secret-token"),
+    { code: "toString", message: "secret-token" },
+    { code: "INVALID_MESSAGE", message: "secret-token" },
+  ]) {
+    assert.doesNotMatch(JSON.stringify(fromSdkError(e), Object.getOwnPropertyNames(fromSdkError(e))), /secret-token/);
+  }
+  assert.doesNotMatch(STATUS.disconnected("secret-token", 4500).text, /secret-token/);
+  assert.doesNotMatch(STATUS.unsubscribed("secret-token", 103).text, /secret-token/);
+});
+
+test("URL empty fragments are rejected, inactive HMAC fields are ignored", () => {
+  assert.throws(
+    () => validate({ url: "ws://localhost/#", auth: "none" }),
+    (e) => e.code === "INVALID_CONFIG",
+  );
+  const cfg = validate({ url: "ws://localhost/", auth: "none", channels: ["news"], ttl: "bad" });
+  assert.deepEqual(cfg.channels, []);
+  for (const field of ["timeout", "maxMessageSize"]) {
+    assert.throws(
+      () => validate({ url: "ws://localhost/", auth: "none", [field]: null }),
+      (e) => e.code === "INVALID_CONFIG",
+    );
+  }
+});
+
+test("disposing a subscription detaches owned SDK listeners", () => {
+  const conn = createConnection({ url: "ws://localhost/", auth: "none" });
+  try {
+    const dispose = conn.subscribe("news", {});
+    const sub = conn.client.getSubscription("news");
+    dispose();
+    for (const event of ["publication", "join", "leave", "subscribing", "subscribed", "unsubscribed"]) {
+      assert.equal(sub.listenerCount(event), 0, event);
+    }
+    assert.equal(sub.listenerCount("error"), 1, "SDK default listener retained");
+  } finally {
+    conn.close();
+  }
+});
+
+test("a 500-input reconnect burst uses shared readiness listeners", async () => {
+  const conn = createConnection({ url: "ws://127.0.0.1:1/", auth: "none", timeout: 100 });
+  conn.connect();
+  const ac = new AbortController();
+  const pending = Promise.allSettled(Array.from({ length: 500 }, () => conn.run(() => {}, { signal: ac.signal })));
+  try {
+    assert.ok(
+      conn.client.listenerCount("connected") <= 2,
+      "one readiness listener per input leaks listeners under bursts",
+    );
+  } finally {
+    ac.abort(coded("CLOSING"));
+    await pending;
+    conn.close();
+  }
+});
+
+test("connection close cancels in-flight work with CLOSING", async () => {
+  // Readiness only is simulated; this verifies operation ownership rather than a transport behavior.
+  const conn = createConnection({ url: "ws://localhost/", auth: "none", timeout: 1000 });
+  conn.client.state = "connected";
+  const entered = new EventEmitter();
+  const ready = once(entered, "work");
+  const pending = conn.run(async () => {
+    entered.emit("work");
+    return await Promise.withResolvers().promise;
+  });
+  const rejected = assert.rejects(pending, (e) => e.code === "CLOSING");
+  await ready;
+  conn.close();
+  await rejected;
+});
+
+test("cancellation between readiness and dispatch prevents sending", async () => {
+  const conn = createConnection({ url: "ws://localhost/", auth: "none" });
+  const ac = new AbortController();
+  let calls = 0;
+  try {
+    conn.client.state = "connecting";
+    const pending = conn.run(
+      () => {
+        calls++;
+      },
+      { signal: ac.signal },
+    );
+    conn.client.state = "connected";
+    conn.client.emit("connected", {});
+    ac.abort(coded("CLOSING"));
+    await assert.rejects(pending, (e) => e.code === "CLOSING");
+    assert.equal(calls, 0);
+  } finally {
+    conn.close();
+  }
+});
+
+test("connection diagnostics omit raw SDK messages, types and subscription channels", () => {
+  const logs = [];
+  const conn = createConnection({
+    url: "ws://localhost/",
+    auth: "none",
+    log: { debug: (m) => logs.push(m), warn: (m) => logs.push(m) },
+  });
+  try {
+    conn.client.emit("error", { type: "secret-token", error: { code: 2, message: "secret-token" } });
+    const dispose = conn.subscribe("secret-token", {});
+    const sub = conn.client.getSubscription("secret-token");
+    sub.emit("error", { type: "secret-token", error: { code: 103, message: "secret-token" } });
+    assert.equal(logs.length, 2);
+    assert.doesNotMatch(logs.join("\n"), /secret-token/);
+    dispose();
+    sub.emit("error", { error: { code: 103, message: "late" } });
+    assert.equal(logs.length, 2);
+  } finally {
+    conn.close();
+  }
+});
+
+test("an acknowledgement racing close settles quietly once and emits no output", async () => {
+  const server = stubServer();
+  server.ack = Promise.withResolvers();
+  server.entered = Promise.withResolvers();
+  const node = makeNode("centrifuge-out", {}, server);
+  const op = input(node, { topic: "news", payload: 1 });
+  await server.entered.promise;
+  const closed = Promise.withResolvers();
+  server.ack.resolve({});
+  node.emit("close", false, closed.resolve);
+  await closed.promise;
+  assert.equal(await op.result, undefined);
+  assert.equal(op.errors.length, 1);
+  assert.equal(op.sent.length, 0);
+  assert.equal(
+    (await input(node, { topic: "news", payload: 2 }).result).code,
+    "CLOSING",
+    "new input after close still fails",
+  );
+});

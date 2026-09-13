@@ -1,0 +1,75 @@
+<script type="text/javascript">
+  RED.nodes.registerType("centrifuge-out", {
+    category: "centrifuge",
+    color: "#c0d8dc",
+    icon: "centrifuge.svg",
+    align: "right",
+    inputs: 1,
+    outputs: 1,
+    inputLabels: "message to publish",
+    outputLabels: "acknowledged",
+    defaults: {
+      name: { value: "" },
+      server: { value: "", type: "centrifuge-server" },
+      channel: { value: "topic", required: true, validate: RED.validators.typedInput("channelType") },
+      channelType: { value: "msg", validate: (v) => ["msg", "flow", "global", "str", "env", "jsonata"].includes(v) },
+    },
+    label: function () {
+      return this.name || (this.channelType === "str" ? this.channel : "centrifuge out");
+    },
+    paletteLabel: "centrifuge out",
+    oneditprepare: function () {
+      $("#node-input-channel").typedInput({
+        default: "msg",
+        typeField: "#node-input-channelType",
+        types: ["msg", "flow", "global", "str", "env", "jsonata"],
+      });
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="centrifuge-out">
+  <div class="form-row">
+    <label for="node-input-server"><i class="fa fa-server"></i> Server</label>
+    <input type="text" id="node-input-server" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-channel"><i class="fa fa-hashtag"></i> Channel</label>
+    <input type="text" id="node-input-channel" />
+    <input type="hidden" id="node-input-channelType" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/markdown" data-help-name="centrifuge-out">
+  Publishes `msg.payload` on a Centrifugo channel and passes the message on once the server has acknowledged it.
+
+  ### Inputs
+
+  : payload (any JSON value) : Required. `null`, `0`, `false`, `""`, `[]`, and `{}` are published verbatim; objects are JSON-encoded exactly as `JSON.stringify` would (Dates become strings, `undefined` properties are dropped). `undefined`, binary data properties (Buffer, typed arrays, nested), and binary values seen by the JSON replacer are rejected with `INVALID_MESSAGE`. Getters are evaluated once: a getter returning a Buffer that its `toJSON` already converted follows that JSON representation.
+
+  ### Outputs
+
+  : centrifuge (object) : `{ action: "publish", channel }` set on the message once the server acknowledged the publication; a previous `msg.centrifuge` is replaced. All other message properties are preserved.
+
+  ### Details
+
+  The channel comes only from the configured selector (default `msg.topic`), evaluated for every message; it must resolve to a non-empty string.
+
+  Publishing on a channel requires `allow_publish_for_client` or `allow_publish_for_subscriber` on its namespace; otherwise the server rejects it with `PERMISSION_DENIED`.
+
+  There is no offline queue: while the shared connection is reconnecting, a publish waits at most the server node's Timeout before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Commands larger than the server node's Max message are refused locally with `INVALID_MESSAGE`, because sending them would make the server close the shared connection.
+
+  Acknowledgement means the server accepted the publication, not that any subscriber received it. A command that times out may still have been delivered. Concurrent inputs may complete out of order. Pending inputs cancelled by this node closing settle quietly, without output; delivery after dispatch can still be unknown.
+
+  > [!TIP]
+  > Wire a Catch node to handle errors; the code is at `msg.error.code`.
+
+  ### References
+
+  - [Centrifugo channels](https://centrifugal.dev/docs/server/channels) - namespace permissions such as `allow_publish_for_client`
+  - [Centrifugo server API](https://centrifugal.dev/docs/server/server_api) - the recommended way to publish from a backend
+</script>

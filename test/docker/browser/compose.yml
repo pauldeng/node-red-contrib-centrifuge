@@ -1,0 +1,17 @@
+# Tier 5 stack (docs/TESTING.md): Centrifugo + the official Node-RED image with this package installed from its
+# own tarball (see build-image.mjs / Dockerfile). Fixed host ports are acceptable for this tier (see e2e.spec.js /
+# image.spec.js header). No volumes on nodered: it must start clean every run.
+services:
+  centrifugo:
+    image: centrifugo/centrifugo:v6.9.4@sha256:78b2fcd11e69f7cd82072924db99865be2beba4a03087d8ce0f5008ae357abe4
+    volumes:
+      - ./centrifugo.json:/centrifugo/config.json:ro
+    command: ["centrifugo", "--config", "/centrifugo/config.json"]
+    ports:
+      - "127.0.0.1:18800:8000"
+  nodered:
+    image: nrc-nodered-e2e:local
+    depends_on:
+      - centrifugo
+    ports:
+      - "127.0.0.1:18801:1880"

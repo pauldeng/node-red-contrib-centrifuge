@@ -1,0 +1,59 @@
+[
+  {
+    "id": "a2b3c4d5e6f70819",
+    "type": "comment",
+    "z": "b3c4d5e6f708192a",
+    "name": "Centrifuge: server-side subscriptions",
+    "info": "Prerequisites: a Centrifugo v6 server on ws://localhost:8000 with `client.token.hmac_secret_key` set:\n\n    \"client\": { \"token\": { \"hmac_secret_key\": \"<your secret>\" } }\n\nOpen the `centrifuge server` configuration and paste that same secret into Secret, then deploy. The config node's Channels list (`news`) becomes the connection token's `channels` claim, so the server subscribes this connection to `news` itself - no client-side subscribe request is sent.\n\nPublish from outside Node-RED, e.g.:\n\n    curl -X POST http://localhost:8000/api/publish -H 'X-API-Key: <your API key>' -d '{\"channel\":\"news\",\"data\":{\"hello\":1}}'\n\nExpected: the `centrifuge in` node shows `subscribed` once connected, and the debug sidebar shows the publication as `{\"hello\":1}` with `msg.topic = \"news\"` and `msg.centrifuge.event = \"publication\"`.",
+    "x": 200,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "c4d5e6f708192a3b",
+    "type": "centrifuge-in",
+    "z": "b3c4d5e6f708192a",
+    "name": "",
+    "server": "e6f708192a3b4c5d",
+    "mode": "server",
+    "channel": "news",
+    "joinLeave": false,
+    "subscriptionAuth": "none",
+    "x": 200,
+    "y": 120,
+    "wires": [["d5e6f708192a3b4c"]]
+  },
+  {
+    "id": "d5e6f708192a3b4c",
+    "type": "debug",
+    "z": "b3c4d5e6f708192a",
+    "name": "received",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 420,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "e6f708192a3b4c5d",
+    "type": "centrifuge-server",
+    "name": "local centrifugo",
+    "url": "ws://localhost:8000/connection/websocket",
+    "auth": "hmac",
+    "user": "node-red",
+    "channels": "news",
+    "ttl": 3600,
+    "timeout": 5000,
+    "maxMessageSize": 65536
+  },
+  {
+    "id": "b3c4d5e6f708192a",
+    "type": "tab",
+    "label": "Centrifuge server-side subscriptions",
+    "disabled": false,
+    "info": ""
+  }
+]
