@@ -1,23 +1,31 @@
-# Agent guide — node-red-contrib-centrifuge
+# @pauldeng/node-red-contrib-centrifuge
 
-Node-RED >= 5 nodes for Centrifugo v6 over the `centrifuge` JavaScript client (WebSocket, JSON protocol). Design decisions and evidence live in `docs/TESTING.md`, the node help texts and the tests; reuse them, do not re-derive them. Follow user instructions and existing authorization. Local completion does not require a commit or release.
+Node-RED nodes for subscribing to and publishing on Centrifugo channels through the official `centrifuge` JavaScript client (WebSocket, JSON), connecting flows with browsers and backends.
 
-Runtime/editor type names, persisted fields, message shapes, status texts and error codes are public contracts. Preserve them unless the intended change requires a compatible extension or an explicit breaking change with a changelog entry.
+This is the shared repository guide for any coding agent. Read linked documents when their subject is relevant; no particular AI platform, external skill, or developer's local setup is required.
 
-## Commands
+## Start here
 
-- `npm run fixture` — download and verify the pinned Centrifugo binary into `.cache/` (also runs as `pretest`)
-- `npm run check` — package sanity, editor contract, and async-style gates
-- `npm test` — checks, unit, package and real-runtime tests once (real Node-RED child + real Centrifugo)
-- `npm run test:unit` / `npm run test:runtime` — focused tiers
-- `npm run lint && npm run format:check`
+- Use Node.js 24+ and npm. Run `npm ci` from the repository root. There is no build or transpilation step; runtime code is CommonJS, utility scripts may be ES modules.
+- [README.md](README.md) and each `nodes/*.html` help block describe the public node contract, installation, examples and troubleshooting.
+- For runtime or ownership changes, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- For runtime/editor conventions, documentation or packaging changes, read [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+- For setup, test selection, fixtures or CI changes, read [docs/TESTING.md](docs/TESTING.md).
+- [package.json](package.json) and its lockfile define scripts, supported versions and exact dependency pins. Verify documentation against the owning code/tests when they disagree; report the discrepancy and correct it within the task's scope.
 
-## Contracts
+## Verify the change
 
-- Node-RED >= 5 on Node.js >= 24; no Node-RED 4 or Node 22 compatibility code.
-- The config node owns one SDK client and the subscription registry until it closes; consumers own their pending inputs. Close never awaits the network.
-- Each input settles once; validation, dynamic evaluation, readiness and I/O share one error and deadline boundary. Catch exposes codes at `msg.error.code` from the closed set in `lib/errors.js`.
-- Secrets live in Node-RED credentials; imported configuration and message overrides are validated at runtime.
-- `async`/`await` only: no promise chains or `new Promise` in runtime or test code (`npm run check` enforces it; exceptions carry an inline `allow-promise:` or `allow-timer:` reason). This applies to `scripts/` too. Waits are events (`once`/`on`, log lines, harness waiters); a timer is only a deadline (`AbortSignal.timeout`) or a deliberately observed time window.
-- Documented Node-RED APIs only; editor internals are not a contract. Exact dependency pins.
-- Report checks as Passed, Failed, Not run or Substituted with the command; never claim a check that did not run.
+- `npm test` runs static gates, unit, package and real-runtime tests. Its pretest downloads the pinned Centrifugo binary into `.cache/` when absent; no Docker needed.
+- `npm run check` runs package, editor-contract and async-style gates only; it does not prove runtime behaviour.
+- `npm run lint` and `npm run format:check` are the lint and formatting gates. Format affected files rather than reformatting unrelated work.
+- Editor changes also need `npm run test:e2e`; transport, container and browser interoperability changes use the relevant Docker tiers. Prerequisites and focused commands are in [docs/TESTING.md](docs/TESTING.md).
+- Finish by reviewing the diff, synchronising affected help/examples/docs, and reporting checks as Passed, Failed, Not run or Substituted with their commands and any remaining limitations. Documentation-only edits need link/command checks and formatting, not the network suites.
+
+## Repository constraints
+
+- Preserve registered type names, saved fields, message shapes, status texts and error codes unless the requested change requires an extension or explicitly permits a breaking change. Record user-visible changes in `CHANGELOG.md`; an entry alone does not authorize a breaking change.
+- Target Node-RED 5+ on Node.js 24+; do not add compatibility code for older versions. Use documented Node-RED APIs and exact dependency pins.
+- Use `async`/`await`, not promise chains or `new Promise`. Use event-driven waits; justified exceptions need the checker's inline `allow-promise:` or `allow-timer:` reason. See the conventions and testing guides for details.
+- Keep secrets in Node-RED credentials and validate imported configuration and message inputs at runtime.
+- Preserve unrelated working-tree changes. Follow the user's instructions and existing authorization; do not commit, push, tag or publish unless asked. Local completion does not require a commit or release.
+- Keep durable guidance here or in its owning document, using repository-relative links. Tool-specific entry files should only forward to this guide. Replace stale instructions instead of accumulating exceptions or session history.

@@ -3,6 +3,7 @@
 // palette, icon, help, and dialog rendering against a Node-RED started from `npm install <tarball>`, not a
 // bind-mounted workspace. Shares the compose stack from ./fixtures.js (worker-scoped) with e2e.spec.js.
 const { test, expect, NR_BASE } = require("./fixtures");
+const PACKAGE = require("../../../package.json").name; // the module id Node-RED reports for this package
 const E = require("../../e2e/editor"); // reused as-is: gotoEditor/openNode need only {base} + a page, no local child
 
 const flow = [
@@ -40,7 +41,7 @@ test("real image: /nodes lists the three types enabled with no error", async ({ 
   await stack.deploy(flow);
   const res = await fetch(`${NR_BASE}/nodes`, { headers: { accept: "application/json" } });
   expect(res.ok).toBe(true);
-  const nodes = (await res.json()).filter((n) => n.module === "node-red-contrib-centrifuge");
+  const nodes = (await res.json()).filter((n) => n.module === PACKAGE);
   expect(nodes.map((n) => n.name).sort()).toEqual(["centrifuge-in", "centrifuge-out", "centrifuge-server"]);
   for (const n of nodes) {
     expect(n.enabled, `${n.name} enabled`).toBe(true);
@@ -52,7 +53,7 @@ test("real image: /icons lists centrifuge.svg under the package", async ({ stack
   const res = await fetch(`${NR_BASE}/icons`, { headers: { accept: "application/json" } });
   expect(res.ok).toBe(true);
   const icons = await res.json();
-  expect(icons["node-red-contrib-centrifuge"]).toContain("centrifuge.svg");
+  expect(icons[PACKAGE]).toContain("centrifuge.svg");
 });
 
 test("real image: palette search and dialog render in the official distribution", async ({ stack, page }) => {

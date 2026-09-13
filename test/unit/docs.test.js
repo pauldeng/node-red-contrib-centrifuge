@@ -44,3 +44,13 @@ test("every examples/*.json parses, uses only known node types, and carries no c
     }
   }
 });
+
+test("AGENTS.md stays short, links resolve, and CLAUDE.md only imports it", () => {
+  const agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8");
+  assert.ok(agents.split("\n").length <= 80, "AGENTS.md must stay under eighty lines; move detail into docs/");
+  for (const [, link] of agents.matchAll(/\]\(([^)]+)\)/g))
+    assert.ok(fs.existsSync(path.join(root, link)), `AGENTS.md links to a missing file: ${link}`);
+  for (const cmd of agents.matchAll(/`npm run ([a-z:]+)`/g))
+    assert.ok(pkg.scripts[cmd[1]], `AGENTS.md names an unknown script: ${cmd[1]}`);
+  assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8").trim(), "@AGENTS.md");
+});

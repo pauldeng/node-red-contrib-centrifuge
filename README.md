@@ -1,4 +1,4 @@
-# node-red-contrib-centrifuge
+# @pauldeng/node-red-contrib-centrifuge
 
 Node-RED nodes for Centrifugo over the official JavaScript client, WebSocket transport, JSON protocol. Every node that selects the same server configuration shares one connection.
 
@@ -7,14 +7,14 @@ Node-RED nodes for Centrifugo over the official JavaScript client, WebSocket tra
 Not yet published to npm. Install from a checkout, inside your Node-RED user directory (`~/.node-red`):
 
 ```
-npm install /path/to/node-red-contrib-centrifuge
+npm install /path/to/node-red-contrib-centrifuge   # the checkout directory
 ```
 
 or pack it and install the tarball:
 
 ```
 npm pack /path/to/node-red-contrib-centrifuge
-npm install /path/to/node-red-contrib-centrifuge-*.tgz
+npm install /path/to/pauldeng-node-red-contrib-centrifuge-*.tgz
 ```
 
 Requirements: see `engines` and the `node-red` block in `package.json` for the supported Node.js and Node-RED versions, and Centrifugo v6 (tested against the pinned binary the test fixture downloads).
@@ -160,16 +160,18 @@ Other messages:
 
 ## Development
 
+From the checkout root, run `npm ci` with a supported Node.js version. No build step is required. Contributor guidance starts in [AGENTS.md](AGENTS.md); [docs/TESTING.md](docs/TESTING.md) covers setup, test selection, fixtures and known coverage gaps.
+
 - `npm run fixture` — download and verify the pinned Centrifugo binary into `.cache/`.
 - `npm run check` — package sanity, editor contract, and async-style gates.
 - `npm test` — checks, unit, and runtime tests.
-- `npm run test:unit` / `npm run test:runtime` — focused tiers.
+- `npm run test:unit` / `npm run test:runtime` — focused tiers; run `npm run fixture` before a direct runtime run on a fresh checkout.
 - `npm run lint` / `npm run format:check`.
-- `npm run test:e2e` — editor dialog checks in a real browser (Playwright, no Docker).
-- `npm run docker:ensure` — installs Docker on Ubuntu when missing, otherwise verifies the daemon is reachable.
+- `npm run test:e2e` — editor dialog checks in a real browser (Playwright, no Docker); install Chromium first with `npx playwright install chromium`.
+- `npm run docker:ensure` — optional Ubuntu host provisioning; can install Docker and change system packages, services and group membership.
 - `npm run test:docker`, `npm run test:ui`, `npm run test:e2e:browser` — Docker tiers: TLS, stalls and a reverse proxy against a Centrifugo container; live status badges in the editor; a real browser page talking to a flow through the official Node-RED image. `npm run test:docker:all` runs all three. See `docs/TESTING.md`.
 
-Tests run against a real Node-RED child process and a real Centrifugo binary downloaded once into `.cache/` — no Docker.
+The default `npm test` uses a real Node-RED child process and a Centrifugo binary downloaded once into `.cache/`; the separately invoked Docker tiers need daemon access for the current user.
 
 ## License
 
