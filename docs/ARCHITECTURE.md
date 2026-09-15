@@ -4,16 +4,18 @@ Read this for connection, subscription, publish or lifecycle changes. User-facin
 
 ## Components
 
-| Component                                                    | Responsibility                                                                                                                                                          |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [centrifuge-server.js](../nodes/centrifuge-server.js)        | Config node: validates configuration, exposes consumer registration and delegates to the connection owner.                                                              |
-| [connection.js](../lib/connection.js)                        | One SDK client, connection status, shared subscription registry, readiness waiters and command execution.                                                               |
-| [centrifuge-in.js](../nodes/centrifuge-in.js)                | Client-side or server-side subscription consumer; turns publications and selected join/leave events into flow messages.                                                 |
-| [centrifuge-out.js](../nodes/centrifuge-out.js)              | Evaluates a channel per input, prepares its payload, publishes and forwards the original message after acknowledgement. Owns pending input cancellation and settlement. |
-| [lifecycle.js](../lib/lifecycle.js)                          | Shared deadline and cancellation boundary.                                                                                                                              |
-| [payload.js](../lib/payload.js)                              | JSON snapshot, binary guard and publish-command size preflight.                                                                                                         |
-| [jwt.js](../lib/jwt.js)                                      | HS256 connection and subscription tokens using `node:crypto`.                                                                                                           |
-| [errors.js](../lib/errors.js), [status.js](../lib/status.js) | Public error codes, local diagnostic labels and status rendering.                                                                                                       |
+| Component                                                    | Responsibility                                                                                                                                                                                                                               |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [centrifuge-server.js](../nodes/centrifuge-server.js)        | Config node: validates configuration, exposes consumer registration and delegates to the connection owner.                                                                                                                                   |
+| [connection.js](../lib/connection.js)                        | One SDK client, connection status, shared subscription registry, readiness waiters and command execution.                                                                                                                                    |
+| [centrifuge-in.js](../nodes/centrifuge-in.js)                | Client-side or server-side subscription consumer; turns publications and selected join/leave events into flow messages.                                                                                                                      |
+| [centrifuge-out.js](../nodes/centrifuge-out.js)              | Evaluates a channel per input, prepares its payload, publishes and forwards the original message after acknowledgement. Pending input cancellation and settlement is shared with `centrifuge-request.js` via `command-node.js`.              |
+| [centrifuge-request.js](../nodes/centrifuge-request.js)      | Evaluates the RPC method or channel per input and issues one `rpc`, `history`, `presence`, or `presence_stats` request, forwarding the message with the result. Built on `command-node.js`.                                                  |
+| [command-node.js](../lib/command-node.js)                    | Shared per-input lifecycle for `centrifuge-out` and `centrifuge-request`: in-flight `AbortController`s, quiet settlement of pending input while the connection is `CLOSING`, close-handler registration, and TypedInput selector evaluation. |
+| [lifecycle.js](../lib/lifecycle.js)                          | Shared deadline and cancellation boundary.                                                                                                                                                                                                   |
+| [payload.js](../lib/payload.js)                              | JSON snapshot, binary guard and command size preflight.                                                                                                                                                                                      |
+| [jwt.js](../lib/jwt.js)                                      | HS256 connection and subscription tokens using `node:crypto`.                                                                                                                                                                                |
+| [errors.js](../lib/errors.js), [status.js](../lib/status.js) | Public error codes, local diagnostic labels and status rendering.                                                                                                                                                                            |
 
 ## Ownership and lifecycle
 
@@ -32,7 +34,7 @@ Read this for connection, subscription, publish or lifecycle changes. User-facin
 
 There is no package offline queue or publish retry. A command already sent can still arrive after the caller times out; cancellation cannot retract it. Concurrent inputs may complete out of order.
 
-`maxMessageSize` checks each prepared publish command against the configured server limit. It does not bound SDK-generated connect/subscribe commands or an SDK batch containing several commands. Oversized frames can terminate the shared connection, so do not describe the preflight as an absolute connection-safety guarantee.
+`maxMessageSize` checks each prepared publish or request command against the configured server limit. It does not bound SDK-generated connect/subscribe commands or an SDK batch containing several commands. Oversized frames can terminate the shared connection, so do not describe the preflight as an absolute connection-safety guarantee.
 
 ## Status and diagnostics
 

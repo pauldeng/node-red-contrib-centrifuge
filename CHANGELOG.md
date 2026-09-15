@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Format: Keep a Changelo
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-15
+
+### Added
+
+- `centrifuge-request` node: RPC calls through the server's RPC proxy, and a channel's history, presence, and presence stats, each node fixed to one action with a TypedInput method/channel selector.
+- `examples/03-request-rpc-history-presence`: history and presence-stats requests against `news`, plus an RPC call to method `echo` (needs the RPC proxy).
+
 ## [0.1.0] - 2026-09-15
 
 ### Added

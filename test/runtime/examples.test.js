@@ -57,3 +57,42 @@ test("examples/02-server-side-subscriptions.json: server-side channel delivers a
   assert.deepEqual((await got).msg.payload, { hello: 1 });
   assert.equal((await got).msg.topic, inNode.channel);
 });
+
+test("examples/03-request-rpc-history-presence.json: every request produces its documented result", async (t) => {
+  const { startRpcBackend } = require("../helpers/rpc-backend");
+  const backend = await startRpcBackend();
+  let srv = null,
+    nr = null;
+  t.after(async () => {
+    try {
+      await nr?.stop();
+    } finally {
+      try {
+        await srv?.stop();
+      } finally {
+        await backend.stop();
+      }
+    }
+  });
+  srv = await startCentrifugo({ config: backend.config });
+  nr = await startNodeRed({ packageDir });
+  const flow = load("03-request-rpc-history-presence.json", srv);
+  const requests = byType(flow, "centrifuge-request");
+  const connected = nr.waitForStatus(requests[0].id, (s) => s.text === "connected");
+  await nr.deploy(flow);
+  await connected;
+  await srv.api("publish", { channel: "news", data: { example: 3 } });
+  for (const request of requests) {
+    const inject = byType(flow, "inject").find((n) => n.wires.flat().includes(request.id));
+    const result = nr.waitForDebug((d) => d.id === request.wires[0][0]);
+    await nr.inject(inject.id);
+    const payload = (await result).msg;
+    if (request.action === "history")
+      assert.deepEqual(
+        payload.publications.map((p) => p.data),
+        [{ example: 3 }],
+      );
+    else if (request.action === "presence_stats") assert.deepEqual(payload, { numUsers: 0, numClients: 0 });
+    else assert.deepEqual(payload, { method: "echo", data: { hello: "world" }, user: "node-red" });
+  }
+});

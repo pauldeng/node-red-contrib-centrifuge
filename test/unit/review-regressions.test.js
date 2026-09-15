@@ -48,12 +48,17 @@ const stubServer = () => ({
         const data = await prepare(check);
         check();
         return work(
-          {
-            publish: async () => {
-              this.calls++;
-              this.entered?.resolve();
-              return this.ack?.promise;
-            },
+          this.client ?? {
+            ...Object.fromEntries(
+              ["publish", "rpc", "history", "presence", "presenceStats"].map((action) => [
+                action,
+                async () => {
+                  this.calls++;
+                  this.entered?.resolve();
+                  return this.ack ? await this.ack.promise : {};
+                },
+              ]),
+            ),
           },
           data,
         );
@@ -78,48 +83,42 @@ const input = (node, msg) => {
   return { result: result.promise, sent, errors };
 };
 
-test("deadline covers a stalled evaluator, and a late result never publishes", async () => {
-  const server = stubServer();
-  let callback;
-  const node = makeNode(
-    "centrifuge-out",
-    { channel: "target", channelType: "global" },
-    server,
-    (_v, _t, _n, _m, cb) => {
+for (const type of ["centrifuge-out", "centrifuge-request"]) {
+  test(`${type}: deadline covers a stalled evaluator, and a late result never publishes`, async () => {
+    const server = stubServer();
+    let callback;
+    const node = makeNode(type, { channel: "target", channelType: "global" }, server, (_v, _t, _n, _m, cb) => {
       callback = cb;
-    },
-  );
-  const op = input(node, { payload: "hello" });
-  const err = await runBounded(() => op.result, { timeout: 300 });
-  assert.equal(err.code, "TIMEOUT");
-  callback(null, "news");
-  await nextTurn();
-  assert.equal(server.calls, 0);
-  assert.equal(op.errors.length, 1);
-  assert.equal(op.sent.length, 0);
-});
+    });
+    const op = input(node, { payload: "hello" });
+    const err = await runBounded(() => op.result, { timeout: 300 });
+    assert.equal(err.code, "TIMEOUT");
+    callback(null, "news");
+    await nextTurn();
+    assert.equal(server.calls, 0);
+    assert.equal(op.errors.length, 1);
+    assert.equal(op.sent.length, 0);
+  });
+}
 
-test("close cancels a stalled evaluator without waiting for its callback", async () => {
-  const server = stubServer();
-  let callback;
-  const node = makeNode(
-    "centrifuge-out",
-    { channel: "target", channelType: "global" },
-    server,
-    (_v, _t, _n, _m, cb) => {
+for (const type of ["centrifuge-out", "centrifuge-request"]) {
+  test(`${type}: close cancels a stalled evaluator without waiting for its callback`, async () => {
+    const server = stubServer();
+    let callback;
+    const node = makeNode(type, { channel: "target", channelType: "global" }, server, (_v, _t, _n, _m, cb) => {
       callback = cb;
-    },
-  );
-  const op = input(node, { payload: "hello" });
-  const closed = Promise.withResolvers();
-  node.emit("close", false, closed.resolve);
-  await runBounded(() => closed.promise, { timeout: 300 });
-  assert.equal(await op.result, undefined);
-  callback(null, "news");
-  await nextTurn();
-  assert.equal(server.calls, 0);
-  assert.equal(op.errors.length, 1);
-});
+    });
+    const op = input(node, { payload: "hello" });
+    const closed = Promise.withResolvers();
+    node.emit("close", false, closed.resolve);
+    await runBounded(() => closed.promise, { timeout: 300 });
+    assert.equal(await op.result, undefined);
+    callback(null, "news");
+    await nextTurn();
+    assert.equal(server.calls, 0);
+    assert.equal(op.errors.length, 1);
+  });
+}
 
 test("input configuration failure is not overwritten by connection status", () => {
   const server = stubServer();
@@ -308,26 +307,28 @@ test("connection diagnostics omit raw SDK messages, types and subscription chann
   }
 });
 
-test("an acknowledgement racing close settles quietly once and emits no output", async () => {
-  const server = stubServer();
-  server.ack = Promise.withResolvers();
-  server.entered = Promise.withResolvers();
-  const node = makeNode("centrifuge-out", {}, server);
-  const op = input(node, { topic: "news", payload: 1 });
-  await server.entered.promise;
-  const closed = Promise.withResolvers();
-  server.ack.resolve({});
-  node.emit("close", false, closed.resolve);
-  await closed.promise;
-  assert.equal(await op.result, undefined);
-  assert.equal(op.errors.length, 1);
-  assert.equal(op.sent.length, 0);
-  assert.equal(
-    (await input(node, { topic: "news", payload: 2 }).result).code,
-    "CLOSING",
-    "new input after close still fails",
-  );
-});
+for (const type of ["centrifuge-out", "centrifuge-request"]) {
+  test(`${type}: an acknowledgement racing close settles quietly once and emits no output`, async () => {
+    const server = stubServer();
+    server.ack = Promise.withResolvers();
+    server.entered = Promise.withResolvers();
+    const node = makeNode(type, {}, server);
+    const op = input(node, { topic: "news", payload: 1 });
+    await server.entered.promise;
+    const closed = Promise.withResolvers();
+    server.ack.resolve({});
+    node.emit("close", false, closed.resolve);
+    await closed.promise;
+    assert.equal(await op.result, undefined);
+    assert.equal(op.errors.length, 1);
+    assert.equal(op.sent.length, 0);
+    assert.equal(
+      (await input(node, { topic: "news", payload: 2 }).result).code,
+      "CLOSING",
+      "new input after close still fails",
+    );
+  });
+}
 
 test("a throwing consumer neither starves its siblings nor escapes into the SDK emitter", () => {
   const warnings = [];
@@ -366,4 +367,100 @@ test("runBounded returns a value that resolved before abort even if the clock pa
   } finally {
     performance.now = realNow;
   }
+});
+
+for (const action of ["history", "presence", "presence_stats"]) {
+  test(`request ${action}: oversize target is rejected before dispatch`, async () => {
+    const server = stubServer();
+    server.maxMessageSize = 100;
+    const node = makeNode("centrifuge-request", { action }, server);
+    const op = input(node, { topic: "é".repeat(100) });
+    assert.equal((await op.result).code, "INVALID_MESSAGE");
+    assert.equal(server.calls, 0);
+    assert.equal(op.sent.length, 0);
+  });
+}
+
+test("request history: invalid objects and accessor exceptions are sanitized validation errors", async () => {
+  const server = stubServer();
+  const node = makeNode("centrifuge-request", { action: "history" }, server);
+  for (const payload of [
+    new Date(),
+    new Map(),
+    Buffer.alloc(0),
+    { "secret-token": 1 },
+    { since: { offset: 0, epoch: "e", "secret-token": 1 } },
+    {
+      get limit() {
+        throw Error("secret-token");
+      },
+    },
+  ]) {
+    const err = await input(node, { topic: "news", payload }).result;
+    assert.equal(err?.code, "INVALID_MESSAGE");
+    assert.doesNotMatch(err.message, /secret-token/);
+  }
+  assert.equal(server.calls, 0);
+});
+
+test("request history: accessor values are validated once and snapshotted", async () => {
+  const server = stubServer();
+  let reads = 0;
+  server.client = { history: async (_channel, opts) => opts };
+  const node = makeNode("centrifuge-request", { action: "history" }, server);
+  const op = input(node, {
+    topic: "news",
+    payload: {
+      get limit() {
+        return ++reads === 1 ? 2 : -1;
+      },
+    },
+  });
+  assert.equal(await op.result, undefined);
+  assert.equal(reads, 1);
+  assert.deepEqual(op.sent[0].payload, { limit: 2 });
+});
+
+test("request history: accepts cross-realm objects and rejects malformed options without dispatch", async () => {
+  const { runInNewContext } = require("node:vm");
+  const server = stubServer();
+  const node = makeNode("centrifuge-request", { action: "history" }, server);
+  assert.equal(
+    await input(node, {
+      topic: "news",
+      payload: runInNewContext('({limit: 0, since: {offset: 0, epoch: "e"}, reverse: false})'),
+    }).result,
+    undefined,
+  );
+  assert.equal(server.calls, 1);
+  for (const payload of [
+    null,
+    [],
+    0,
+    { limit: -1 },
+    { limit: 1.5 },
+    { limit: Number.MAX_SAFE_INTEGER + 1 },
+    { reverse: "false" },
+    { since: [] },
+    { since: { offset: -1, epoch: "e" } },
+    { since: { offset: 0, epoch: "" } },
+  ]) {
+    assert.equal((await input(node, { topic: "news", payload }).result).code, "INVALID_MESSAGE");
+  }
+  server.maxMessageSize = 200;
+  assert.equal(
+    (await input(node, { topic: "news", payload: { since: { offset: 0, epoch: "e".repeat(200) } } }).result).code,
+    "INVALID_MESSAGE",
+  );
+  assert.equal(server.calls, 1);
+});
+
+test("request: invalid imported action and selector fail before I/O", async () => {
+  const server = stubServer();
+  for (const config of [{ action: "publish" }, { targetType: "num" }, { target: " " }]) {
+    const node = makeNode("centrifuge-request", config, server);
+    assert.equal(node.statuses.at(-1).fill, "red");
+    assert.equal((await input(node, { topic: "echo", payload: null }).result).code, "INVALID_CONFIG");
+  }
+  assert.equal(server.calls, 0);
 });

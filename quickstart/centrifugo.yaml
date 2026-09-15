@@ -39,6 +39,14 @@ channel:
     history_size: 10
     history_ttl: 300s
 
+# RPC proxy for `centrifuge request` (action "rpc"): https://centrifugal.dev/docs/server/proxy
+# rpc:
+#   proxy:
+#     endpoint: http://127.0.0.1:8001/rpc
+#     timeout: 5s
+#   without_namespace:
+#     proxy_enabled: true
+
 http_api:
   # Key for the server HTTP API (POST /api/publish etc.), the recommended way for backends to publish.
   key: replace-with-an-api-key

@@ -39,6 +39,8 @@ Focused examples (replace the test file as needed):
 node --test test/unit/payload.test.js
 npm run fixture
 node --test --test-concurrency=1 test/runtime/centrifuge-out.test.js
+node --test --test-concurrency=1 test/runtime/centrifuge-request.test.js
+npm run test:e2e -- test/e2e/request.spec.js
 node --test --test-concurrency=1 test/docker/integration/proxy.test.js
 ```
 
@@ -61,6 +63,7 @@ The browser page loads the SDK from this checkout's dependencies rather than a C
 ## Fixture and assertion rules
 
 - Reuse [test/helpers/node-red.js](../test/helpers/node-red.js) for real Node-RED and the matching binary/Docker helper for Centrifugo. A unit stub must not be used as evidence for SDK or wire behaviour.
+- [test/helpers/rpc-backend.js](../test/helpers/rpc-backend.js) starts a minimal `node:http` server implementing Centrifugo's HTTP RPC proxy protocol for `centrifuge-request` RPC tests: method `echo` succeeds, `fail` answers error 1001, `hold` waits for the test to call `release()`, and anything else answers error 1002. Its `config` fragment enables the proxy when passed to `startCentrifugo`.
 - Give regular flow nodes unique ids distinct from type names (for example `catch1`) and a `z` pointing to a tab. Config nodes and tabs do not need `z`.
 - Wait for events, log lines, harness waiters or Playwright expectations. Register debug waiters before triggering publish, subscription or page close, and wait for the receiving subscription before publishing.
 - Use one bounded deadline for each wait; no arbitrary sleeps. A deliberately observed negative window needs an inline `allow-timer:` reason. The binary helper waits for the server's ready log and retries only a refused socket connection until its deadline; the Docker helper checks the ready log, mapped port and HTTP health response.
