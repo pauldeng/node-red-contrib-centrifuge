@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Format: Keep a Changelo
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-13
+## [0.1.0] - 2026-09-15
 
 ### Added
 
