@@ -14,26 +14,36 @@ From a checkout instead, run `npm install /path/to/node-red-contrib-centrifuge` 
 
 ## Quick start
 
-Enable client subscribe and publish on Centrifugo's default namespace, and set a secret to sign connection tokens with:
+You need a Centrifugo v6 server that lets clients subscribe and publish on the default namespace. A ready configuration lives in [`quickstart/centrifugo.yaml`](https://github.com/pauldeng/node-red-contrib-centrifuge/blob/main/quickstart/centrifugo.yaml).
 
-```json
-{
-  "client": { "token": { "hmac_secret_key": "<your secret>" } },
-  "channel": {
-    "without_namespace": { "allow_subscribe_for_client": true, "allow_publish_for_client": true }
-  }
-}
+1. Edit `quickstart/centrifugo.yaml` and set `client.token.hmac_secret_key` to a long random value. Easy sources: `centrifugo genconfig -c fresh.json` prints a generated one, your password manager can generate one, or a UUID from a generator site such as [uuidgenerator.net](https://www.uuidgenerator.net) (fine for a local trial; keep production secrets local).
+2. Get the Centrifugo binary for your platform from the [releases page](https://github.com/centrifugal/centrifugo/releases) (in a checkout of this repository, `npm run fixture` downloads the pinned version into `.cache/centrifugo/`) and start it:
+
+   ```
+   centrifugo --config quickstart/centrifugo.yaml
+   ```
+
+   It listens on `ws://localhost:8000/connection/websocket`, and `http://localhost:8000/health` answers `{}` once it is up. The file is commented: bind address and port under `http_server`, a TLS block to uncomment for `wss://`, and the namespace permissions the nodes rely on.
+
+3. In Node-RED import `01-subscribe-and-publish` (menu, Import, Examples, this package), open the `centrifuge server` configuration node, paste the same secret into **Secret**, and deploy. The `centrifuge in` node shows `subscribed`.
+4. Click the inject button: the message is published on `news` and arrives back through `centrifuge in` in the debug sidebar.
+
+`02-server-side-subscriptions` shows the alternative: channels granted through the connection token instead of a client-side subscribe request. Both examples use the same server configuration.
+
+### Try it from another client
+
+Any Centrifugo client can join the same channel. With Postman or another WebSocket tool, connect to `ws://localhost:8000/connection/websocket` and send a connect command carrying a token signed with the same secret:
+
+```
+centrifugo gentoken -c quickstart/centrifugo.yaml -u postman -t 86400
 ```
 
-Run Centrifugo with that config:
-
 ```
-centrifugo --config config.json
+{"connect":{"token":"<token>"},"id":1}
+{"subscribe":{"channel":"news"},"id":2}
 ```
 
-In Node-RED, import `examples/01-subscribe-and-publish.json`, open the `centrifuge server` configuration node, paste the secret into **Secret**, and deploy. Click the inject node: the message is published and arrives back through `centrifuge in`.
-
-`examples/02-server-side-subscriptions.json` shows the alternative: channels granted through the connection token instead of a client-side subscribe request.
+Injecting in Node-RED now delivers `{"push":{"channel":"news","pub":{"data":{"hello":"world"}}}}` to that client, and sending `{"publish":{"channel":"news","data":{"from":"postman"}},"id":3}` from it appears in the Node-RED debug sidebar. Answer each server ping `{}` with `{}`, or the server drops the connection after its pong timeout.
 
 ## Nodes
 

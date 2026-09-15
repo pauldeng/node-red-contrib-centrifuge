@@ -1,0 +1,47 @@
+# Centrifugo v6 configuration for the example flows of @pauldeng/node-red-contrib-centrifuge.
+# Run:  centrifugo --config quickstart/centrifugo.yaml
+# Configuration overview: https://centrifugal.dev/docs/server/configuration
+# Every available parameter with its default and description (this file uses only a handful):
+#   online:  https://centrifugal.dev/docs/server/console_commands#configdoc
+#   offline: `centrifugo configdoc` (full reference) or `centrifugo defaultconfig --dry-run` (all defaults)
+
+http_server:
+  # Bind address. 127.0.0.1 = this machine only; remove the line (or use 0.0.0.0) to accept clients from other hosts.
+  address: 127.0.0.1
+  # One port serves WebSocket (/connection/websocket), the HTTP API (/api) and /health.
+  port: 8000
+  # TLS (wss://). Both keys accept either a file path or the PEM text itself. After enabling, point the
+  # centrifuge server node at wss://host:8000/connection/websocket; for a private CA also start Node-RED with
+  # NODE_EXTRA_CA_CERTS=/path/to/ca.pem, because Node's WebSocket has no per-connection certificate options.
+  # tls:
+  #   enabled: true
+  #   cert_pem: /etc/centrifugo/server.pem
+  #   key_pem: /etc/centrifugo/server.key
+
+client:
+  token:
+    # Shared secret used to sign connection tokens. Paste the same value into the server node's Secret field.
+    # Generate one with `centrifugo genconfig -c fresh.yaml`, your password manager, or a UUID generator.
+    hmac_secret_key: replace-with-a-long-random-secret
+  # Origins allowed to connect from browsers. "*" is fine locally; list your sites in production.
+  allowed_origins: ["*"]
+
+channel:
+  # The default namespace (channels without a "ns:" prefix), permissive so the examples work out of the box.
+  without_namespace:
+    allow_subscribe_for_client: true
+    allow_publish_for_client: true # required for `centrifuge out`; backends usually publish via the HTTP API instead
+    allow_history_for_client: true
+    allow_presence_for_client: true
+    presence: true
+    join_leave: true
+    force_push_join_leave: true
+    history_size: 10
+    history_ttl: 300s
+
+http_api:
+  # Key for the server HTTP API (POST /api/publish etc.), the recommended way for backends to publish.
+  key: replace-with-an-api-key
+
+health:
+  enabled: true # GET /health answers {} when the server is up

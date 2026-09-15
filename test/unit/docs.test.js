@@ -15,8 +15,8 @@ test("README mentions every node type and every error code", async () => {
   for (const code of Object.keys(CODES)) assert.ok(readme.includes(code), `README missing error code ${code}`);
 });
 
-test("README prose has no semver-like version numbers outside fenced code blocks", async () => {
-  const stripped = readme.replace(/```[\s\S]*?```/g, "");
+test("README prose has no semver-like version numbers outside code", async () => {
+  const stripped = readme.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, ""); // fenced blocks and inline code are not prose
   const match = stripped.match(/\bv?\d+\.\d+\.\d+\b/);
   assert.equal(match, null, `found version-like text: ${match && match[0]}`);
 });
@@ -53,4 +53,13 @@ test("AGENTS.md stays short, links resolve, and CLAUDE.md only imports it", () =
   for (const cmd of agents.matchAll(/`npm run ([a-z:]+)`/g))
     assert.ok(pkg.scripts[cmd[1]], `AGENTS.md names an unknown script: ${cmd[1]}`);
   assert.equal(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8").trim(), "@AGENTS.md");
+});
+
+test("quickstart config matches what the examples need and is referenced by README", () => {
+  const cfg = fs.readFileSync(path.join(root, "quickstart/centrifugo.yaml"), "utf8");
+  assert.match(cfg, /^\s+hmac_secret_key: \S+/m, "hmac secret placeholder present");
+  assert.match(cfg, /^\s+allow_subscribe_for_client: true/m);
+  assert.match(cfg, /^\s+allow_publish_for_client: true/m);
+  assert.match(cfg, /^\s+# tls:/m, "TLS block present as comments");
+  assert.match(fs.readFileSync(path.join(root, "README.md"), "utf8"), /quickstart\/centrifugo\.yaml/);
 });
