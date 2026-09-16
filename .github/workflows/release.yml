@@ -51,12 +51,13 @@ jobs:
       - name: verify from the registry, not the workflow log
         run: |
           NAME=$(node -p 'require("./package.json").name'); VERSION=$(node -p 'require("./package.json").version')
-          for i in 1 2 3 4 5 6; do
+          # The registry can take several minutes to serve a fresh version; poll for up to ten minutes.
+          for i in $(seq 1 30); do
             if npm view "$NAME@$VERSION" version dist.tarball dist.attestations --json > "$RUNNER_TEMP/published.json" &&
               node scripts/check-published-package.js "$RUNNER_TEMP/published.json"; then
               exit 0
             fi
-            sleep 10
+            sleep 20
           done
           echo "Registry did not confirm the version, tarball and provenance metadata" >&2
           exit 1
