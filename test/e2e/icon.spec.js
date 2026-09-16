@@ -53,7 +53,7 @@ for (const theme of E.THEMES) {
     await E.gotoEditor(page, nr, theme);
     // the palette filters on keyup, so type key by key instead of fill()
     await page.locator("#red-ui-palette-search input").pressSequentially("centrifuge");
-    await expect(page.locator("#red-ui-palette .red-ui-palette-node:visible")).toHaveCount(2);
+    await expect(page.locator("#red-ui-palette .red-ui-palette-node:visible")).toHaveCount(3);
     const count = await page.evaluate(
       () =>
         [...document.querySelectorAll("image")].filter((i) =>

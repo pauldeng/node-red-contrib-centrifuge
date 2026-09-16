@@ -1,0 +1,98 @@
+<script type="text/javascript">
+  RED.nodes.registerType("centrifuge-request", {
+    category: "centrifuge",
+    color: "#c0d8dc",
+    icon: "centrifuge.svg",
+    inputs: 1,
+    outputs: 1,
+    inputLabels: "request",
+    outputLabels: "result",
+    defaults: {
+      name: { value: "" },
+      server: { value: "", type: "centrifuge-server" },
+      action: { value: "rpc", validate: (v) => ["rpc", "history", "presence", "presence_stats"].includes(v) },
+      target: { value: "topic", required: true, validate: RED.validators.typedInput("targetType") },
+      targetType: { value: "msg", validate: (v) => ["msg", "flow", "global", "str", "env", "jsonata"].includes(v) },
+    },
+    label: function () {
+      const action = (typeof this.action === "string" ? this.action : "rpc").replace("_", " ");
+      return this.name || (this.targetType === "str" ? `${action} ${this.target}` : `centrifuge ${action}`);
+    },
+    paletteLabel: "centrifuge request",
+    oneditprepare: function () {
+      $("#node-input-target").typedInput({
+        default: "msg",
+        typeField: "#node-input-targetType",
+        types: ["msg", "flow", "global", "str", "env", "jsonata"],
+      });
+      const relabel = () => {
+        const rpc = $("#node-input-action").val() === "rpc";
+        $("#centrifuge-request-target-label").text(rpc ? "Method" : "Channel");
+        $("#centrifuge-request-target-icon").attr("class", rpc ? "fa fa-code" : "fa fa-hashtag");
+      };
+      $("#node-input-action").on("change", relabel);
+      relabel();
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="centrifuge-request">
+  <div class="form-row">
+    <label for="node-input-server"><i class="fa fa-server"></i> Server</label>
+    <input type="text" id="node-input-server" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-action"><i class="fa fa-cog"></i> Action</label>
+    <select id="node-input-action" style="width: 70%">
+      <option value="rpc">RPC call</option>
+      <option value="history">History</option>
+      <option value="presence">Presence</option>
+      <option value="presence_stats">Presence stats</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-target"
+      ><i id="centrifuge-request-target-icon" class="fa fa-code"></i>
+      <span id="centrifuge-request-target-label">Method</span></label
+    >
+    <input type="text" id="node-input-target" />
+    <input type="hidden" id="node-input-targetType" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+</script>
+
+<script type="text/markdown" data-help-name="centrifuge-request">
+  Sends one request to Centrifugo per message and passes the message on with the result in `msg.payload`: an RPC call through the server's RPC proxy, or a channel's history, presence, or presence stats.
+
+  ### Inputs
+
+  : payload (any JSON value | object) : For `rpc` the request data, required; send `null` for a call without data. The JSON rules of `centrifuge out` apply (`JSON.stringify` semantics, no `undefined`, no binary values). For `history` an optional plain options object `{ limit, since: { offset, epoch }, reverse }`: `limit` is a non-negative safe integer (default 100), `since` needs a non-negative safe integer `offset` and a non-empty string `epoch`, `reverse` is a boolean; other keys (including inside `since`) or a non-plain-object payload fail with `INVALID_MESSAGE`. Ignored for `presence` and `presence_stats`.
+
+  ### Outputs
+
+  : payload (any JSON value | object) : The result, replacing the input payload. `rpc`: the data returned by the backend. `history`: `{ publications, offset, epoch }`, each publication `{ channel, data, offset, info? }`. `presence`: `{ clients }` keyed by client id, each `{ user, client, connInfo?, chanInfo? }`. `presence_stats`: `{ numUsers, numClients }`.
+  : centrifuge (object) : `{ action: "rpc", method }` for RPC calls, `{ action, channel }` for the channel actions; a previous `msg.centrifuge` is replaced. All other message properties are preserved.
+
+  ### Details
+
+  **Action** is fixed in the configuration; a message cannot switch it. The RPC **Method** or the **Channel** comes only from the configured selector (default `msg.topic`), evaluated for every message; it must resolve to a non-empty string.
+
+  `rpc` needs an RPC proxy on the Centrifugo side (`rpc.proxy.endpoint` and `rpc.without_namespace.proxy_enabled`, or an `rpc.namespaces` entry); without one the server answers code 108 (not available) and the message fails with `SERVER_ERROR`. Backend error replies use the same error-code mapping as other commands (for example, 103 becomes `PERMISSION_DENIED`; custom codes such as 1001 become `SERVER_ERROR`). The numeric code is part of the error message text.
+
+  `history` needs `history_size` and `history_ttl` plus `allow_history_for_client` on the channel's namespace; `presence` and `presence_stats` need `presence: true` plus `allow_presence_for_client`. A feature the namespace does not enable answers code 108, an unknown namespace code 102 (both `SERVER_ERROR`), and a channel this connection may not access fails with `PERMISSION_DENIED`. `limit: 0` returns only the current stream position (`offset`, `epoch`). The server caps `limit` with its own `client.history_max_publication_limit` (code 106). `since` returns the publications after the given position; `reverse: true` walks from the newest publication.
+
+  Deadlines, size preflight, the absence of an offline queue, and cancellation on close behave exactly as for `centrifuge out`: a request waits at most the server node's Timeout while the shared connection reconnects, fails `NOT_CONNECTED` once the connection has failed permanently, and is refused locally with `INVALID_MESSAGE` when the encoded command exceeds the server node's Max message.
+
+  > [!TIP]
+  > Wire a Catch node to handle errors; the code is at `msg.error.code`.
+
+  ### References
+
+  - [Centrifugo proxy](https://centrifugal.dev/docs/server/proxy) - RPC proxy protocol and configuration
+  - [History and recovery](https://centrifugal.dev/docs/server/history_and_recovery) - stream positions, `since`, limits
+  - [Presence](https://centrifugal.dev/docs/server/presence) - presence and presence stats
+  - [Server error codes](https://centrifugal.dev/docs/server/codes) - meaning of codes 102, 103, 106, 108
+</script>

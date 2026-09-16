@@ -1,6 +1,6 @@
 {
   "name": "@pauldeng/node-red-contrib-centrifuge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Node-RED nodes for Centrifugo over the centrifuge JavaScript client (WebSocket, JSON protocol)",
   "license": "MIT",
   "repository": {
@@ -26,7 +26,8 @@
     "nodes": {
       "centrifuge-server": "nodes/centrifuge-server.js",
       "centrifuge-in": "nodes/centrifuge-in.js",
-      "centrifuge-out": "nodes/centrifuge-out.js"
+      "centrifuge-out": "nodes/centrifuge-out.js",
+      "centrifuge-request": "nodes/centrifuge-request.js"
     }
   },
   "files": [
@@ -44,15 +45,15 @@
     "test": "npm run check && node --test --test-concurrency=1 \"test/unit/*.test.js\" test/package-contract.test.js \"test/runtime/*.test.js\"",
     "test:unit": "node --test \"test/unit/*.test.js\"",
     "test:runtime": "node --test --test-concurrency=1 \"test/runtime/*.test.js\"",
-    "test:e2e": "playwright test --project editor",
+    "test:e2e": "playwright test --project=editor",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:release": "node scripts/check-package.mjs --release",
     "docker:ensure": "bash scripts/ensure-docker-ubuntu.sh",
     "test:docker": "node --test --test-concurrency=1 \"test/docker/integration/*.test.js\"",
-    "test:ui": "playwright test --project docker-ui",
-    "test:e2e:browser": "playwright test --project docker-browser",
+    "test:ui": "playwright test --project=docker-ui",
+    "test:e2e:browser": "playwright test --project=docker-browser",
     "test:docker:all": "npm run test:docker && npm run test:ui && npm run test:e2e:browser"
   },
   "dependencies": {

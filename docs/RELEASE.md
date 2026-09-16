@@ -17,14 +17,14 @@ maintainer from their own terminal, never from an agent session or CI.
    - Allowed actions: enable direct publishing with `npm publish`. This workflow publishes directly and requires that permission; stage-only permissions are incompatible with it. See the [npm trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/).
      npm does not verify the tuple when you save it; a typo only shows up as a failed release.
 5. Still in Settings, set publishing access to "Require two-factor authentication and disallow tokens". Trusted publishers keep working; classic tokens stop.
-6. Protect `main` on GitHub: require the CI checks to pass before merging. A solo maintainer needs no required reviewers.
+6. Protect `main` on GitHub with a branch ruleset: require a pull request before merging, require the CI checks to pass, block force pushes and deletions. A solo maintainer needs no required reviewers.
 7. Submit the package to the Flow Library at https://flows.nodered.org/add/node once the first version is on npm.
 
 ## Every release after that
 
 1. Move the `Unreleased` entries in `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD` and set the same version in `package.json` (`npm version x.y.z --no-git-tag-version` keeps the lockfile in sync).
 2. Open a pull request; CI must be green on the merge commit.
-3. Create a GitHub Release with tag `vx.y.z` on `main`. The workflow checks the tag equals the package version, that the version is not on the registry yet, that the changelog has its section, reruns lint, format, `npm test`, the editor suite, `npm audit --omit=dev` and `npm run check:release`, installs the packed tarball into a clean Node-RED and confirms all three node types register, publishes with provenance, and finally requires the expected version, a tarball URL and SLSA provenance metadata from the registry. The registry check retries while metadata propagates and fails if any required field remains absent.
+3. Create a GitHub Release with tag `vx.y.z` on `main`. The workflow checks the tag equals the package version, that the version is not on the registry yet, that the changelog has its section, reruns lint, format, `npm test`, the editor suite, `npm audit --omit=dev` and `npm run check:release`, installs the packed tarball into a clean Node-RED and confirms all declared node types register, publishes with provenance, and finally requires the expected version, a tarball URL and SLSA provenance metadata from the registry. The registry check retries while metadata propagates and fails if any required field remains absent.
 4. Trust the registry, not the workflow log: `npm view @pauldeng/node-red-contrib-centrifuge@x.y.z dist.attestations` must list the provenance attestation.
 5. Refresh the Flow Library entry if the README or node set changed.
 

@@ -39,6 +39,45 @@ channel:
     history_size: 10
     history_ttl: 300s
 
+  namespaces:
+    # Map subscription (Centrifugo 6.8+, experimental): a server-owned key/value collection instead of a pub/sub
+    # stream. Used by examples/04-map-subscription (channel "kv:board"). Docs: https://centrifugal.dev/docs/server/map_subscriptions
+    - name: kv
+      subscription_type: map
+      allow_subscribe_for_client: true
+      map:
+        mode: persistent
+        allow_publish_for_client: true # required for `centrifuge out` mode map_publish
+        allow_remove_for_client: true # required for `centrifuge out` mode map_remove
+
+    # Map presence (commented out): channels under "games:" publish each subscriber's client/user presence into
+    # server-managed maps "clients:"/"users:" (subscribe to "clients:games:room1" to see who is in "games:room1").
+    # Docs: https://centrifugal.dev/docs/server/map_subscriptions
+    # - name: games
+    #   allow_subscribe_for_client: true
+    #   map_clients_presence_channel_prefix: "clients:"
+    #   map_users_presence_channel_prefix: "users:"
+    # - name: clients
+    #   subscription_type: map_clients
+    #   allow_subscribe_for_client: true
+    #   map:
+    #     mode: recoverable
+    #     key_ttl: 60s
+    # - name: users
+    #   subscription_type: map_users
+    #   allow_subscribe_for_client: true
+    #   map:
+    #     mode: recoverable
+    #     key_ttl: 60s
+
+# RPC proxy for `centrifuge request` (action "rpc"): https://centrifugal.dev/docs/server/proxy
+# rpc:
+#   proxy:
+#     endpoint: http://127.0.0.1:8001/rpc
+#     timeout: 5s
+#   without_namespace:
+#     proxy_enabled: true
+
 http_api:
   # Key for the server HTTP API (POST /api/publish etc.), the recommended way for backends to publish.
   key: replace-with-an-api-key

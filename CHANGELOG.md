@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format: Keep a Changelo
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-16
+
+### Added
+
+- `centrifuge-request` node: RPC calls through the server's RPC proxy, and a channel's history, presence, and presence stats, each node fixed to one action with a TypedInput method/channel selector.
+- `examples/03-request-rpc-history-presence`: history and presence-stats requests against `news`, plus an RPC call to method `echo` (needs the RPC proxy).
+- `centrifuge-in` node: `map`, `map_clients`, and `map_users` modes for Centrifugo map subscriptions, emitting `sync` (full snapshot) and `update` (per-key) events; nodes sharing a map keep one snapshot so a node added or redeployed later receives the current state immediately.
+- `centrifuge-out` node: `map_publish` and `map_remove` modes with a **Key** TypedInput selector, for setting and removing keys on a map channel.
+- `examples/04-map-subscription`: a map subscription against the quick-start `kv` namespace, setting and removing a key.
+
 ## [0.1.0] - 2026-09-15
 
 ### Added

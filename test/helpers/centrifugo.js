@@ -79,6 +79,33 @@ function baseConfig(port) {
           history_ttl: "60s",
           force_recovery: true,
         },
+        // Map subscriptions (Centrifugo >= 6.8): "kv" is a writable persistent map, "ro" a read-only one; subscribing
+        // to "games" publishes client/user presence into the "clients"/"users" map namespaces.
+        {
+          name: "kv",
+          subscription_type: "map",
+          allow_subscribe_for_client: true,
+          map: { mode: "persistent", allow_publish_for_client: true, allow_remove_for_client: true },
+        },
+        { name: "ro", subscription_type: "map", allow_subscribe_for_client: true, map: { mode: "persistent" } },
+        {
+          name: "games",
+          allow_subscribe_for_client: true,
+          map_clients_presence_channel_prefix: "clients:",
+          map_users_presence_channel_prefix: "users:",
+        },
+        {
+          name: "clients",
+          subscription_type: "map_clients",
+          allow_subscribe_for_client: true,
+          map: { mode: "recoverable", key_ttl: "60s" },
+        },
+        {
+          name: "users",
+          subscription_type: "map_users",
+          allow_subscribe_for_client: true,
+          map: { mode: "recoverable", key_ttl: "60s" },
+        },
       ],
     },
   };

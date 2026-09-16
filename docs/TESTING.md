@@ -39,6 +39,8 @@ Focused examples (replace the test file as needed):
 node --test test/unit/payload.test.js
 npm run fixture
 node --test --test-concurrency=1 test/runtime/centrifuge-out.test.js
+node --test --test-concurrency=1 test/runtime/centrifuge-request.test.js
+npm run test:e2e -- test/e2e/request.spec.js
 node --test --test-concurrency=1 test/docker/integration/proxy.test.js
 ```
 
@@ -61,6 +63,8 @@ The browser page loads the SDK from this checkout's dependencies rather than a C
 ## Fixture and assertion rules
 
 - Reuse [test/helpers/node-red.js](../test/helpers/node-red.js) for real Node-RED and the matching binary/Docker helper for Centrifugo. A unit stub must not be used as evidence for SDK or wire behaviour.
+- The binary fixture's namespaces, alongside the permissive default and the `locked`/`recover` streams: `kv:` a writable persistent map (`allow_subscribe_for_client`, `allow_publish_for_client`, `allow_remove_for_client`); `ro:` a read-only persistent map (subscribe only, no client publish/remove); `games:` a stream namespace that publishes client/user presence into the map namespaces via `map_clients_presence_channel_prefix: "clients:"` / `map_users_presence_channel_prefix: "users:"`; `clients:` / `users:` recoverable `map_clients` / `map_users` presence maps (`key_ttl: 60s`) fed by `games:` (for example, `games:room1` feeds `clients:games:room1` and `users:games:room1`).
+- [test/helpers/rpc-backend.js](../test/helpers/rpc-backend.js) starts a minimal `node:http` server implementing Centrifugo's HTTP RPC proxy protocol for `centrifuge-request` RPC tests: method `echo` succeeds, `fail` answers error 1001, `hold` waits for the test to call `release()`, and anything else answers error 1002. Its `config` fragment enables the proxy when passed to `startCentrifugo`.
 - Give regular flow nodes unique ids distinct from type names (for example `catch1`) and a `z` pointing to a tab. Config nodes and tabs do not need `z`.
 - Wait for events, log lines, harness waiters or Playwright expectations. Register debug waiters before triggering publish, subscription or page close, and wait for the receiving subscription before publishing.
 - Use one bounded deadline for each wait; no arbitrary sleeps. A deliberately observed negative window needs an inline `allow-timer:` reason. The binary helper waits for the server's ready log and retries only a refused socket connection until its deadline; the Docker helper checks the ready log, mapped port and HTTP health response.

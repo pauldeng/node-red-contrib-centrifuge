@@ -1,5 +1,5 @@
 "use strict";
-// Layout across the three dialogs: no horizontal overflow at 1440x900 and 800x600, light and dark.
+// Layout across the four dialogs: no horizontal overflow at 1440x900 and 800x600, light and dark.
 // Look at the screenshots in test-results/screenshots/ before declaring the UI done.
 const { test, expect } = require("./fixtures");
 const E = require("./editor");
@@ -41,12 +41,24 @@ const flow = [
     channelType: "msg",
     wires: [[]],
   },
+  {
+    id: "req1",
+    type: "centrifuge-request",
+    z: "f1",
+    name: "",
+    server: "srv1",
+    action: "history",
+    target: "topic",
+    targetType: "msg",
+    wires: [[]],
+  },
 ];
 
 const dialogs = [
   { name: "server", open: (page) => E.openConfig(page, "centrifuge-server", "srv1"), config: true },
   { name: "in", open: (page) => E.openNode(page, "in1"), config: false },
   { name: "out", open: (page) => E.openNode(page, "out1"), config: false },
+  { name: "request", open: (page) => E.openNode(page, "req1"), config: false },
 ];
 
 for (const dialog of dialogs)

@@ -9,7 +9,10 @@
     defaults: {
       name: { value: "" },
       server: { value: "", type: "centrifuge-server" },
-      mode: { value: "subscribe", validate: (v) => ["subscribe", "server"].includes(v) },
+      mode: {
+        value: "subscribe",
+        validate: (v) => ["subscribe", "server", "map", "map_clients", "map_users"].includes(v),
+      },
       channel: {
         value: "",
         validate: function (v) {
@@ -29,6 +32,9 @@
     label: function () {
       if (this.name) return this.name;
       if (this.mode === "server") return this.channel ? `server: ${this.channel}` : "server subscriptions";
+      if (this.mode === "map") return `map: ${this.channel}`;
+      if (this.mode === "map_clients") return `clients: ${this.channel}`;
+      if (this.mode === "map_users") return `users: ${this.channel}`;
       return this.channel || "centrifuge in";
     },
     paletteLabel: "centrifuge in",
@@ -37,17 +43,15 @@
       const channelLabel = $("#centrifuge-in-channel-label");
       const channelHint = $("#centrifuge-in-channel-hint");
       const authRow = $("#centrifuge-in-row-auth");
+      const joinLeaveRow = $("#centrifuge-in-row-joinleave");
+      const MAP_MODES = ["map", "map_clients", "map_users"];
       const update = () => {
         const mode = modeSelect.val();
-        if (mode === "server") {
-          channelLabel.text("Filter");
-          channelHint.show();
-          authRow.hide();
-        } else {
-          channelLabel.text("Channel");
-          channelHint.hide();
-          authRow.show();
-        }
+        const isServer = mode === "server";
+        channelLabel.text(isServer ? "Filter" : "Channel");
+        channelHint.toggle(isServer);
+        authRow.toggle(!isServer);
+        joinLeaveRow.toggle(!MAP_MODES.includes(mode));
         $("#node-input-channel, #node-input-subscriptionAuth").trigger("change");
       };
       modeSelect.on("change", update);
@@ -66,6 +70,9 @@
     <select id="node-input-mode" style="width: 70%">
       <option value="subscribe">Subscribe to a channel</option>
       <option value="server">Server-side subscriptions</option>
+      <option value="map">Map subscription (key-value)</option>
+      <option value="map_clients">Map presence: clients</option>
+      <option value="map_users">Map presence: users</option>
     </select>
   </div>
   <div class="form-row">
@@ -78,7 +85,7 @@
     Leave blank to receive every server-side subscription granted to this connection; set it to receive only one
     channel.
   </div>
-  <div class="form-row">
+  <div class="form-row" id="centrifuge-in-row-joinleave">
     <label for="node-input-joinLeave"><i class="fa fa-user-o"></i></label>
     <input type="checkbox" id="node-input-joinLeave" style="width: auto; vertical-align: top" />
     <label for="node-input-joinLeave" style="width: auto">Also receive join/leave events</label>
@@ -102,8 +109,8 @@
   ### Outputs
 
   : topic (string) : The channel the message came from.
-  : payload (any) : The publication data as received (any JSON value, including `null`), or the `ClientInfo` object for a join/leave event.
-  : centrifuge (object) : `{ event, channel, offset?, tags?, info? }`. `event` is `publication`, `join` or `leave`; `offset` and `tags` are omitted when the server did not send them (an offset of `0` is kept); `info` is present for join/leave and for a publication the server tagged with sender info.
+  : payload (any) : The publication data as received (any JSON value, including `null`), the `ClientInfo` object for a join/leave event, the full entries array for a map sync, or one updated map value/`ClientInfo`/`null` for a map update.
+  : centrifuge (object) : `{ event, channel, offset?, tags?, info? }` for **Subscribe to a channel** and **Server-side subscriptions**: `event` is `publication`, `join` or `leave`; `offset` and `tags` are omitted when the server did not send them (an offset of `0` is kept); `info` is present for join/leave and for a publication the server tagged with sender info. For a map mode, `{ event, channel, key?, offset?, info?, removed? }`: `event` is `sync` (once, on subscribe and after a full resync) or `update` (per key change); `update` also carries the changed `key`, and `removed: true` when the key was removed.
 
   ### Details
 
@@ -111,18 +118,29 @@
 
   : Subscribe to a channel : A client-side subscription to **Channel**, created (and torn down) by this node. Two `centrifuge in` nodes subscribed to the same channel on the same server share one underlying subscription. Join and leave events reach only the nodes that enable **Also receive join/leave events**; opting in later does not disturb the shared subscription. **Subscription token** adds a per-channel HMAC token (needs the server node's HMAC auth) for namespaces that require `subscribe_for_client` with a signed subscription.
   : Server-side subscriptions : Reads from subscriptions the server already granted this connection through the token's `channels` claim (the server node's **Channels** list). **Channel** here is an optional exact-match filter: leave it blank to receive every granted channel, or set it to receive only one. The status reads `awaiting server subscription` (yellow) while connected but not yet granted that channel.
+  : Map subscription (key-value) : A client-side subscription to a **Channel** whose namespace has `subscription_type: map` (an experimental Centrifugo feature). On subscribe (and after any full resync) this node emits one `sync` message whose `payload` is the complete list of entries, `[{ key, data?, offset?, info? }]`, as delivered by the server. After that, each key change emits one `update` message: `payload` is the new `data` when present, otherwise the causing client's `info` when present, otherwise `null`; a removed key emits `update` with `payload: null` and `centrifuge.removed: true`. **Also receive join/leave events** does not apply and is hidden; **Subscription token** still applies.
+  : Map presence: clients : Like **Map subscription (key-value)**, for a namespace with `subscription_type: map_clients`: a server-managed map keyed by client ID, populated automatically as clients join and leave a channel whose own namespace names this one in `map_clients_presence_channel_prefix`. Update entries carry `info` (`{ client, user }`) and no `data`.
+  : Map presence: users : Like **Map presence: clients**, for a namespace with `subscription_type: map_users` and a channel naming it in `map_users_presence_channel_prefix`. Entries are keyed by user ID and carry neither `data` nor `info`, so an update's `payload` is `null`.
 
-  A channel cannot be both in the server node's **Channels** list and used by a subscribe-mode node: that combination is rejected as a conflicting subscription (the server already owns it server-side).
+  A channel cannot be both in the server node's **Channels** list and used by a subscribe-mode node: that combination is rejected as a conflicting subscription (the server already owns it server-side). Two `centrifuge in` nodes on the same channel must agree on the subscription type; a mismatch is rejected the same way.
 
-  A subscription the server refuses shows `unsubscribed: permission denied (103)` and is logged once; it does not retry.
+  A subscription the server refuses shows `unsubscribed: permission denied (103)`, is logged once and does not retry; this is also what a map mode shows against a namespace whose `subscription_type` does not match (or a non-map namespace), and what a non-map mode shows against a map namespace.
 
-  There is no delivery guarantee across a Node-RED restart or a redeploy that drops the connection: the underlying SDK only recovers missed publications within one running process, and only when the server's namespace has recovery enabled. There is no backpressure; a slow flow downstream of this node still receives every event as fast as the server sends it.
+  Nodes sharing a map subscription retain one local copy of its latest state. A newly added or partially redeployed node receives that snapshot immediately; during reconnect it is the last known state, followed by recovered updates or a replacement snapshot.
+
+  A namespace enables a map mode with `channel.namespaces[].subscription_type` (`map`, `map_clients` or `map_users`) and a `map` block: `map.mode` is `ephemeral`, `recoverable` or `persistent` (`map.key_ttl` is required for the first two and expires keys; `persistent` keeps keys until removed). With the default in-memory map broker the whole map is lost when the server restarts. `map_clients`/`map_users` namespaces are populated from another namespace's `map_clients_presence_channel_prefix`/`map_users_presence_channel_prefix`, not written to directly.
+
+  There is no delivery guarantee across a Node-RED restart or a redeploy that drops the connection: the underlying SDK only recovers missed publications and map updates within one running process, and only when the server's namespace has recovery enabled. There is no backpressure; a slow flow downstream of this node still receives every event as fast as the server sends it.
 
   > [!NOTE]
   > Join/leave events are only delivered to nodes that enabled **Also receive join/leave events**; the server may still track presence for the channel regardless.
+
+  > [!NOTE]
+  > Map subscriptions are an experimental Centrifugo server feature; the wire protocol and behaviour may still change in a future server release.
 
   ### References
 
   - [Centrifugo channels](https://centrifugal.dev/docs/server/channels) - namespaces and permissions
   - [Server-side subscriptions](https://centrifugal.dev/docs/transports/client_api#server-side-subscriptions) - the `channels` connection claim
+  - [Map subscriptions](https://centrifugal.dev/docs/server/map_subscriptions) - namespace configuration and presence maps
 </script>

@@ -1,74 +1,67 @@
 "use strict";
-// Publishes msg.payload to a channel over the shared centrifuge-server connection. No offline queue: while
-// reconnecting a publish waits the server node's Timeout then fails TIMEOUT; a terminal connection fails NOT_CONNECTED.
-const { promisify } = require("node:util");
-const { coded, fromSdkError } = require("../lib/errors");
+// Publishes msg.payload to a channel, or writes/removes a key on a map channel (Centrifugo experimental map
+// subscriptions), over the shared centrifuge-server connection. No offline queue: while reconnecting an operation
+// waits the server node's Timeout then fails TIMEOUT; a terminal connection fails NOT_CONNECTED.
+const { coded } = require("../lib/errors");
 const { STATUS, statusRenderer } = require("../lib/status");
-const { prepareCommand } = require("../lib/payload");
-const CHANNEL_TYPES = new Set(["msg", "flow", "global", "str", "env", "jsonata"]);
+const { prepareCommand, prepareRequest } = require("../lib/payload");
+const { validSelector, evaluateSelector, attachCommandLifecycle } = require("../lib/command-node");
+
+const MODES = new Set(["publish", "map_publish", "map_remove"]);
 
 module.exports = function (RED) {
-  const evaluate = promisify(RED.util.evaluateNodeProperty);
-
   function CentrifugeOutNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
     const render = statusRenderer(node);
     const channelType = config.channelType === undefined ? "msg" : config.channelType;
     const selector = config.channel === undefined ? "topic" : config.channel;
-    const invalid = !CHANNEL_TYPES.has(channelType) || typeof selector !== "string" || !selector.trim();
+    const invalidChannel = !validSelector(selector, channelType);
+    const mode = config.mode === undefined ? "publish" : config.mode;
+    const invalidMode = !MODES.has(mode);
+    const mapMode = mode === "map_publish" || mode === "map_remove";
+    const keyType = config.keyType === undefined ? "msg" : config.keyType;
+    const keySelector = config.key === undefined ? "key" : config.key;
+    const invalidKey = mapMode && !validSelector(keySelector, keyType);
     const server = RED.nodes.getNode(config.server);
-    const inflight = new Map(); // AbortController -> settlement promise, so close() can await every in-flight input
-    let closing = false;
 
     if (!server) render(STATUS.missingServer);
-    else if (invalid) render(STATUS.invalidConfig("invalid channel selector"));
+    else if (invalidChannel) render(STATUS.invalidConfig("invalid channel selector"));
+    else if (invalidMode) render(STATUS.invalidConfig("invalid mode"));
+    else if (invalidKey) render(STATUS.invalidConfig("invalid key selector"));
     else server.register(node, render);
 
-    node.on("input", async (msg, send, done) => {
-      const ac = new AbortController();
-      const settle = Promise.withResolvers();
-      inflight.set(ac, settle.promise);
-      try {
-        if (closing) throw coded("CLOSING");
-        if (!server) throw coded("MISSING_SERVER");
-        if (invalid) throw coded("INVALID_CONFIG", "invalid channel selector");
-        let channel;
-        await server.run((client, data) => client.publish(channel, data), {
-          signal: ac.signal,
+    attachCommandLifecycle(node, server, async (msg, signal) => {
+      if (invalidChannel) throw coded("INVALID_CONFIG", "invalid channel selector");
+      if (invalidMode) throw coded("INVALID_CONFIG", "invalid mode");
+      if (invalidKey) throw coded("INVALID_CONFIG", "invalid key selector");
+      let channel, key;
+      await server.run(
+        (client, data) => {
+          if (mode === "map_remove") return client.mapRemove(channel, key);
+          if (mode === "map_publish") return client.mapPublish(channel, key, data);
+          return client.publish(channel, data);
+        },
+        {
+          signal,
           prepare: async (check) => {
-            try {
-              channel = await evaluate(selector, channelType, node, msg);
-            } catch {
-              throw coded("INVALID_MESSAGE", "channel evaluation failed");
-            }
+            channel = await evaluateSelector(RED, node, msg, selector, channelType, "channel");
             check();
-            if (typeof channel !== "string" || !channel.trim())
-              throw coded("INVALID_MESSAGE", "channel must be a non-empty string");
+            if (mapMode) {
+              key = await evaluateSelector(RED, node, msg, keySelector, keyType, "key");
+              check();
+            }
+            if (mode === "map_remove") {
+              prepareRequest("publish", { channel, type: 1, key, removed: true }, server.maxMessageSize);
+              return undefined;
+            }
+            if (mode === "map_publish")
+              return prepareCommand("publish", { channel, type: 1, key }, msg.payload, server.maxMessageSize).data;
             return prepareCommand("publish", { channel }, msg.payload, server.maxMessageSize).data;
           },
-        });
-        if (closing) throw coded("CLOSING");
-        msg.centrifuge = { action: "publish", channel };
-        send(msg);
-        done();
-      } catch (err) {
-        // Teardown is expected and must not emit Catch/log noise. New inputs received after close still fail.
-        const error = fromSdkError(err);
-        done(ac.signal.aborted && error.code === "CLOSING" ? undefined : error);
-      } finally {
-        inflight.delete(ac);
-        settle.resolve();
-      }
-    });
-
-    node.on("close", async (_removed, done) => {
-      closing = true;
-      for (const ac of inflight.keys()) ac.abort(coded("CLOSING"));
-      await Promise.allSettled(inflight.values());
-      server?.deregister(node);
-      node.status({});
-      done();
+        },
+      );
+      msg.centrifuge = mapMode ? { action: mode, channel, key } : { action: mode, channel };
     });
   }
 

@@ -37,12 +37,17 @@ const flow = [
   },
 ];
 
-test("real image: /nodes lists the three types enabled with no error", async ({ stack }) => {
+test("real image: /nodes lists the four types enabled with no error", async ({ stack }) => {
   await stack.deploy(flow);
   const res = await fetch(`${NR_BASE}/nodes`, { headers: { accept: "application/json" } });
   expect(res.ok).toBe(true);
   const nodes = (await res.json()).filter((n) => n.module === PACKAGE);
-  expect(nodes.map((n) => n.name).sort()).toEqual(["centrifuge-in", "centrifuge-out", "centrifuge-server"]);
+  expect(nodes.map((n) => n.name).sort()).toEqual([
+    "centrifuge-in",
+    "centrifuge-out",
+    "centrifuge-request",
+    "centrifuge-server",
+  ]);
   for (const n of nodes) {
     expect(n.enabled, `${n.name} enabled`).toBe(true);
     expect(n.err, `${n.name} err`).toBeUndefined();
@@ -63,7 +68,7 @@ test("real image: palette search and dialog render in the official distribution"
 
   // the palette filters on keyup, so type key by key instead of fill()
   await page.locator("#red-ui-palette-search input").pressSequentially("centrifuge");
-  await expect(page.locator("#red-ui-palette .red-ui-palette-node:visible")).toHaveCount(2);
+  await expect(page.locator("#red-ui-palette .red-ui-palette-node:visible")).toHaveCount(3);
 
   await E.openNode(page, "in1");
   await expect(page.locator("#node-dialog-ok")).toBeVisible();
