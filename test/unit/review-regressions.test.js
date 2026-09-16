@@ -381,6 +381,23 @@ for (const action of ["history", "presence", "presence_stats"]) {
   });
 }
 
+test("centrifuge-out map_remove: oversize key is refused before dispatch", async () => {
+  const server = stubServer();
+  server.maxMessageSize = 100;
+  // the default evaluator echoes msg.topic regardless of which selector is asked for; distinguish the two calls
+  // (channel, then key) by the selector text itself so the channel stays short and only the key is oversize.
+  const node = makeNode(
+    "centrifuge-out",
+    { mode: "map_remove", channel: "topic", channelType: "msg", key: "bigkey", keyType: "msg" },
+    server,
+    (value, _type, _node, msg, cb) => cb(null, value === "bigkey" ? "k".repeat(200) : msg.topic),
+  );
+  const op = input(node, { topic: "kv:board", payload: 1 });
+  assert.equal((await op.result).code, "INVALID_MESSAGE");
+  assert.equal(server.calls, 0);
+  assert.equal(op.sent.length, 0);
+});
+
 test("request history: invalid objects and accessor exceptions are sanitized validation errors", async () => {
   const server = stubServer();
   const node = makeNode("centrifuge-request", { action: "history" }, server);
@@ -464,3 +481,35 @@ test("request: invalid imported action and selector fail before I/O", async () =
   }
   assert.equal(server.calls, 0);
 });
+
+for (const mode of ["map_publish", "map_remove"]) {
+  test(`centrifuge-out ${mode}: preflight covers every SDK command field`, async () => {
+    const server = stubServer();
+    let calls = 0;
+    server.client = {
+      mapPublish: async () => {
+        calls++;
+      },
+      mapRemove: async () => {
+        calls++;
+      },
+    };
+    const msg = { topic: "kv:board", key: "score", payload: "value" };
+    const params = {
+      channel: msg.topic,
+      type: 1,
+      key: msg.key,
+      ...(mode === "map_remove" ? { removed: true } : { data: msg.payload }),
+    };
+    const bytes = Buffer.byteLength(JSON.stringify({ publish: params, id: Number.MAX_SAFE_INTEGER }));
+    const node = makeNode("centrifuge-out", { mode }, server, (selector, _type, _node, input, cb) =>
+      cb(null, input[selector]),
+    );
+    server.maxMessageSize = bytes - 1;
+    assert.equal((await input(node, { ...msg }).result)?.code, "INVALID_MESSAGE");
+    assert.equal(calls, 0);
+    server.maxMessageSize = bytes;
+    assert.equal(await input(node, { ...msg }).result, undefined);
+    assert.equal(calls, 1);
+  });
+}

@@ -13,9 +13,27 @@
       server: { value: "", type: "centrifuge-server" },
       channel: { value: "topic", required: true, validate: RED.validators.typedInput("channelType") },
       channelType: { value: "msg", validate: (v) => ["msg", "flow", "global", "str", "env", "jsonata"].includes(v) },
+      mode: { value: "publish", validate: (v) => ["publish", "map_publish", "map_remove"].includes(v) },
+      key: {
+        value: "key",
+        validate: function (v) {
+          const mode = $("#node-input-mode").val() || this.mode;
+          if (mode !== "map_publish" && mode !== "map_remove") return true;
+          return RED.validators.typedInput("keyType").call(this, v);
+        },
+      },
+      keyType: { value: "msg", validate: (v) => ["msg", "flow", "global", "str", "env", "jsonata"].includes(v) },
     },
     label: function () {
-      return this.name || (this.channelType === "str" ? this.channel : "centrifuge out");
+      if (this.name) return this.name;
+      if (this.channelType === "str") {
+        if (this.mode === "map_publish") return `map set ${this.channel}`;
+        if (this.mode === "map_remove") return `map remove ${this.channel}`;
+        return this.channel;
+      }
+      if (this.mode === "map_publish") return "map set";
+      if (this.mode === "map_remove") return "map remove";
+      return "centrifuge out";
     },
     paletteLabel: "centrifuge out",
     oneditprepare: function () {
@@ -24,6 +42,18 @@
         typeField: "#node-input-channelType",
         types: ["msg", "flow", "global", "str", "env", "jsonata"],
       });
+      $("#node-input-key").typedInput({
+        default: "msg",
+        typeField: "#node-input-keyType",
+        types: ["msg", "flow", "global", "str", "env", "jsonata"],
+      });
+      // A flow saved before Mode existed has no value here; a plain <select> has no typedInput fallback for that.
+      if (!$("#node-input-mode").val()) $("#node-input-mode").val("publish");
+      const toggleKeyRow = () => {
+        $("#centrifuge-out-row-key").toggle($("#node-input-mode").val() !== "publish");
+      };
+      $("#node-input-mode").on("change", toggleKeyRow);
+      toggleKeyRow();
     },
   });
 </script>
@@ -39,21 +69,35 @@
     <input type="hidden" id="node-input-channelType" />
   </div>
   <div class="form-row">
+    <label for="node-input-mode"><i class="fa fa-cog"></i> Mode</label>
+    <select id="node-input-mode" style="width: 70%">
+      <option value="publish">Publish to a channel</option>
+      <option value="map_publish">Map: set a key</option>
+      <option value="map_remove">Map: remove a key</option>
+    </select>
+  </div>
+  <div class="form-row" id="centrifuge-out-row-key">
+    <label for="node-input-key"><i class="fa fa-key"></i> Key</label>
+    <input type="text" id="node-input-key" />
+    <input type="hidden" id="node-input-keyType" />
+  </div>
+  <div class="form-row">
     <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
     <input type="text" id="node-input-name" placeholder="Name" />
   </div>
 </script>
 
 <script type="text/markdown" data-help-name="centrifuge-out">
-  Publishes `msg.payload` on a Centrifugo channel and passes the message on once the server has acknowledged it.
+  Publishes `msg.payload` on a Centrifugo channel, or writes to or removes a key on a map channel, and passes the message on once the server has acknowledged it.
 
   ### Inputs
 
-  : payload (any JSON value) : Required. `null`, `0`, `false`, `""`, `[]`, and `{}` are published verbatim; objects are JSON-encoded exactly as `JSON.stringify` would (Dates become strings, `undefined` properties are dropped). `undefined`, binary data properties (Buffer, typed arrays, nested), and binary values seen by the JSON replacer are rejected with `INVALID_MESSAGE`. Getters are evaluated once: a getter returning a Buffer that its `toJSON` already converted follows that JSON representation.
+  : payload (any JSON value) : Required for Mode `Publish to a channel` and `Map: set a key`. `null`, `0`, `false`, `""`, `[]`, and `{}` are published verbatim; objects are JSON-encoded exactly as `JSON.stringify` would (Dates become strings, `undefined` properties are dropped). `undefined`, binary data properties (Buffer, typed arrays, nested), and binary values seen by the JSON replacer are rejected with `INVALID_MESSAGE`. Getters are evaluated once: a getter returning a Buffer that its `toJSON` already converted follows that JSON representation. Ignored for `Map: remove a key`.
+  : key (string) : Required for Mode `Map: set a key` and `Map: remove a key`, from the configured Key selector (default `msg.key`); it must resolve to a non-empty string. Ignored for `Publish to a channel`.
 
   ### Outputs
 
-  : centrifuge (object) : `{ action: "publish", channel }` set on the message once the server acknowledged the publication; a previous `msg.centrifuge` is replaced. All other message properties are preserved.
+  : centrifuge (object) : `{ action: "publish", channel }` for Mode `Publish to a channel`; `{ action: "map_publish", channel, key }` or `{ action: "map_remove", channel, key }` for the map modes; set once the server acknowledged the operation. A previous `msg.centrifuge` is replaced. All other message properties are preserved.
 
   ### Details
 
@@ -61,9 +105,11 @@
 
   Publishing on a channel requires `allow_publish_for_client` or `allow_publish_for_subscriber` on its namespace; otherwise the server rejects it with `PERMISSION_DENIED`.
 
-  There is no offline queue: while the shared connection is reconnecting, a publish waits at most the server node's Timeout before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Waiting publishes are not capped: during a reconnect the node holds about input rate × Timeout messages in memory, so rate-limit bursty flows with a Delay node upstream. Commands larger than the server node's Max message are refused locally with `INVALID_MESSAGE`, because sending them would make the server close the shared connection.
+  `Map: set a key` and `Map: remove a key` target Centrifugo's experimental map subscriptions: the channel's namespace must declare `subscription_type: map` with a `map` block. Setting a key needs `map.allow_publish_for_client` or `map.allow_publish_for_subscriber`; removing a key needs `map.allow_remove_for_client`. A plain `Publish to a channel` on a map channel is refused the same way a missing map permission is: with `PERMISSION_DENIED`.
 
-  Acknowledgement means the server accepted the publication, not that any subscriber received it. A command that times out may still have been delivered. Concurrent inputs may complete out of order. Pending inputs cancelled by this node closing settle quietly, without output; delivery after dispatch can still be unknown.
+  There is no offline queue: while the shared connection is reconnecting, an operation waits at most the server node's Timeout before failing with `TIMEOUT`; a permanently failed connection fails immediately with `NOT_CONNECTED`. Waiting operations are not capped: during a reconnect the node holds about input rate × Timeout messages in memory, so rate-limit bursty flows with a Delay node upstream. Commands larger than the server node's Max message are refused locally with `INVALID_MESSAGE`, because sending them would make the server close the shared connection.
+
+  Acknowledgement means the server accepted the operation, not that any subscriber received it. A command that times out may still have been delivered. Concurrent inputs may complete out of order. Pending inputs cancelled by this node closing settle quietly, without output; delivery after dispatch can still be unknown.
 
   > [!TIP]
   > Wire a Catch node to handle errors; the code is at `msg.error.code`.
@@ -72,4 +118,5 @@
 
   - [Centrifugo channels](https://centrifugal.dev/docs/server/channels) - namespace permissions such as `allow_publish_for_client`
   - [Centrifugo server API](https://centrifugal.dev/docs/server/server_api) - the recommended way to publish from a backend
+  - [Centrifugo map subscriptions](https://centrifugal.dev/docs/server/map_subscriptions) - map channel configuration and permissions
 </script>

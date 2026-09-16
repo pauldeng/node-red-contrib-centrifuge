@@ -15,19 +15,32 @@ module.exports = function (RED) {
 
     const onEvent = (ctx) => {
       if (closing) return;
-      const msg = {
-        topic: ctx.channel,
-        payload: ctx.event === "publication" ? ctx.data : ctx.info,
-        centrifuge: {
+      let payload, centrifuge;
+      if (ctx.event === "sync") {
+        payload = ctx.entries;
+        centrifuge = { event: "sync", channel: ctx.channel };
+      } else if (ctx.event === "update") {
+        payload = ctx.removed === true ? null : ctx.data !== undefined ? ctx.data : (ctx.info ?? null);
+        centrifuge = {
+          event: "update",
+          channel: ctx.channel,
+          key: ctx.key,
+          ...(ctx.removed === true && { removed: true }),
+          ...(ctx.offset !== undefined && { offset: ctx.offset }),
+          ...(ctx.info !== undefined && { info: ctx.info }),
+        };
+      } else {
+        payload = ctx.event === "publication" ? ctx.data : ctx.info;
+        centrifuge = {
           event: ctx.event,
           channel: ctx.channel,
           ...(ctx.offset !== undefined && { offset: ctx.offset }),
           ...(ctx.tags !== undefined && { tags: ctx.tags }),
           ...(ctx.info !== undefined && { info: ctx.info }),
-        },
-      };
-      // The connection fans the same ctx out to every consumer of a channel: never share ctx.data by reference.
-      node.send(RED.util.cloneMessage(msg));
+        };
+      }
+      // The connection fans the same ctx out to every consumer of a channel: never share ctx.data/entries by reference.
+      node.send(RED.util.cloneMessage({ topic: ctx.channel, payload, centrifuge }));
     };
 
     if (!server) {
@@ -35,18 +48,31 @@ module.exports = function (RED) {
     } else {
       try {
         const mode = config.mode === undefined ? "subscribe" : config.mode;
-        if (!["subscribe", "server"].includes(mode)) throw coded("INVALID_CONFIG", "mode must be subscribe or server");
+        const MAP_MODES = ["map", "map_clients", "map_users"];
+        if (!["subscribe", "server", ...MAP_MODES].includes(mode))
+          throw coded("INVALID_CONFIG", "mode must be subscribe, server, map, map_clients or map_users");
         if (config.joinLeave !== undefined && typeof config.joinLeave !== "boolean")
           throw coded("INVALID_CONFIG", "joinLeave must be a boolean");
         // Subscription registrations seed and combine their own status; a raw connection event must not
         // overwrite a subscription failure or briefly render a refused subscription green.
-        if ((config.mode ?? "subscribe") === "server") {
+        if (mode === "server") {
           dispose = server.onServerSide({
             channel: config.channel === "" ? undefined : config.channel,
             joinLeave: config.joinLeave === true,
             onEvent,
             onStatus: render,
           });
+        } else if (MAP_MODES.includes(mode)) {
+          // Map subscriptions are server-managed: join/leave does not apply.
+          dispose = server.subscribe(
+            config.channel,
+            { onEvent, onStatus: render },
+            {
+              joinLeave: false,
+              subscriptionAuth: config.subscriptionAuth === undefined ? "none" : config.subscriptionAuth,
+              type: mode,
+            },
+          );
         } else {
           dispose = server.subscribe(
             config.channel,

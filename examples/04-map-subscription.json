@@ -1,0 +1,195 @@
+[
+  {
+    "id": "788f6fabb1da67c6",
+    "type": "comment",
+    "z": "aff20ddf043031dc",
+    "name": "Centrifuge: map subscription",
+    "info": "Prerequisites: a Centrifugo v6 server on ws://localhost:8000. The repository ships one: edit quickstart/centrifugo.yaml (set client.token.hmac_secret_key), then run `centrifugo --config quickstart/centrifugo.yaml`. Its `kv` namespace (subscription_type map, mode persistent) already allows client subscribe, map_publish and map_remove, so this example works unmodified.\n\nOpen the `centrifuge server` configuration, paste the server's `client.token.hmac_secret_key` into Secret, and deploy.\n\nExpected: the `centrifuge in` node shows `subscribed` and its debug output first shows a `sync` snapshot (empty on a fresh server). Click \"set sensor-1\": a `centrifuge out` node in map_publish mode sets key `sensor-1` to `{\"temperature\":21.5}` on channel `kv:board`, the `centrifuge in` node's debug shows an `update` event with that key and data, and \"set acknowledged\" shows `msg.centrifuge = {\"action\":\"map_publish\",\"channel\":\"kv:board\",\"key\":\"sensor-1\"}`. Click \"remove sensor-1\": the same key is removed, the `centrifuge in` node's debug shows an `update` event with `removed: true` and `payload: null`, and \"remove acknowledged\" shows `msg.centrifuge = {\"action\":\"map_remove\",\"channel\":\"kv:board\",\"key\":\"sensor-1\"}`.",
+    "x": 200,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "937ff828b5a59384",
+    "type": "centrifuge-in",
+    "z": "aff20ddf043031dc",
+    "name": "",
+    "server": "4b2d2eb76db8fa91",
+    "mode": "map",
+    "channel": "kv:board",
+    "joinLeave": false,
+    "subscriptionAuth": "none",
+    "x": 200,
+    "y": 120,
+    "wires": [["49893719fb08e529"]]
+  },
+  {
+    "id": "49893719fb08e529",
+    "type": "debug",
+    "z": "aff20ddf043031dc",
+    "name": "received",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 420,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "dedcbdb54c3590ab",
+    "type": "inject",
+    "z": "aff20ddf043031dc",
+    "name": "set sensor-1",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      },
+      {
+        "p": "key",
+        "v": "sensor-1",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "kv:board",
+    "payload": "{\"temperature\":21.5}",
+    "payloadType": "json",
+    "x": 190,
+    "y": 200,
+    "wires": [["20d3f70119580ffd"]]
+  },
+  {
+    "id": "20d3f70119580ffd",
+    "type": "centrifuge-out",
+    "z": "aff20ddf043031dc",
+    "name": "set key",
+    "server": "4b2d2eb76db8fa91",
+    "mode": "map_publish",
+    "channel": "topic",
+    "channelType": "msg",
+    "key": "key",
+    "keyType": "msg",
+    "x": 410,
+    "y": 200,
+    "wires": [["e17bc3e6d009eaf2"]]
+  },
+  {
+    "id": "e17bc3e6d009eaf2",
+    "type": "debug",
+    "z": "aff20ddf043031dc",
+    "name": "set acknowledged",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "centrifuge",
+    "targetType": "msg",
+    "x": 650,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "f7abaabb9bbe4d4d",
+    "type": "inject",
+    "z": "aff20ddf043031dc",
+    "name": "remove sensor-1",
+    "props": [
+      {
+        "p": "topic",
+        "vt": "str"
+      },
+      {
+        "p": "key",
+        "v": "sensor-1",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "topic": "kv:board",
+    "x": 190,
+    "y": 260,
+    "wires": [["8727187ef6c1283a"]]
+  },
+  {
+    "id": "8727187ef6c1283a",
+    "type": "centrifuge-out",
+    "z": "aff20ddf043031dc",
+    "name": "remove key",
+    "server": "4b2d2eb76db8fa91",
+    "mode": "map_remove",
+    "channel": "topic",
+    "channelType": "msg",
+    "key": "key",
+    "keyType": "msg",
+    "x": 420,
+    "y": 260,
+    "wires": [["e96c2f4c570d7dd7"]]
+  },
+  {
+    "id": "e96c2f4c570d7dd7",
+    "type": "debug",
+    "z": "aff20ddf043031dc",
+    "name": "remove acknowledged",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "centrifuge",
+    "targetType": "msg",
+    "x": 660,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "9f299771c127a8d5",
+    "type": "catch",
+    "z": "aff20ddf043031dc",
+    "name": "",
+    "scope": ["20d3f70119580ffd", "8727187ef6c1283a"],
+    "uncaught": false,
+    "x": 200,
+    "y": 340,
+    "wires": [["13d6e01fb04fca59"]]
+  },
+  {
+    "id": "13d6e01fb04fca59",
+    "type": "debug",
+    "z": "aff20ddf043031dc",
+    "name": "error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 420,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "4b2d2eb76db8fa91",
+    "type": "centrifuge-server",
+    "name": "local centrifugo",
+    "url": "ws://localhost:8000/connection/websocket",
+    "auth": "hmac",
+    "user": "node-red",
+    "channels": "",
+    "ttl": 3600,
+    "timeout": 5000,
+    "maxMessageSize": 65536
+  },
+  {
+    "id": "aff20ddf043031dc",
+    "type": "tab",
+    "label": "Centrifuge map subscription",
+    "disabled": false,
+    "info": ""
+  }
+]

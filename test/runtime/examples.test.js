@@ -96,3 +96,46 @@ test("examples/03-request-rpc-history-presence.json: every request produces its 
     else assert.deepEqual(payload, { method: "echo", data: { hello: "world" }, user: "node-red" });
   }
 });
+
+test("examples/04-map-subscription.json: sync snapshot, then a set and a remove reach the map subscriber", async (t) => {
+  const srv = await startCentrifugo();
+  const nr = await startNodeRed({ packageDir });
+  t.after(async () => {
+    await nr.stop();
+    await srv.stop();
+  });
+  const flow = load("04-map-subscription.json", srv);
+  const inNode = byType(flow, "centrifuge-in")[0];
+  assert.equal(inNode.mode, "map");
+  const debugs = byType(flow, "debug");
+  const received = debugs.find((d) => d.name === "received");
+  const setAck = debugs.find((d) => d.name === "set acknowledged");
+  const removeAck = debugs.find((d) => d.name === "remove acknowledged");
+  const injects = byType(flow, "inject");
+  const setInject = injects.find((n) => n.name === "set sensor-1");
+  const removeInject = injects.find((n) => n.name === "remove sensor-1");
+
+  const subscribed = nr.waitForStatus(inNode.id, (s) => s.text === "subscribed");
+  const sync = nr.waitForDebug((d) => d.id === received.id && d.msg.centrifuge.event === "sync");
+  await nr.deploy(flow);
+  await subscribed;
+  const synced = (await sync).msg;
+  assert.deepEqual(synced.payload, []);
+  assert.deepEqual(synced.centrifuge, { event: "sync", channel: "kv:board" });
+
+  const update1 = nr.waitForDebug((d) => d.id === received.id && d.msg.centrifuge.event === "update");
+  const ack1 = nr.waitForDebug((d) => d.id === setAck.id);
+  await nr.inject(setInject.id);
+  const set = (await update1).msg;
+  assert.equal(set.centrifuge.key, "sensor-1");
+  assert.equal(set.payload.temperature, 21.5);
+  assert.deepEqual((await ack1).msg, { action: "map_publish", channel: "kv:board", key: "sensor-1" });
+
+  const update2 = nr.waitForDebug((d) => d.id === received.id && d.msg.centrifuge.removed === true);
+  const ack2 = nr.waitForDebug((d) => d.id === removeAck.id);
+  await nr.inject(removeInject.id);
+  const removed = (await update2).msg;
+  assert.equal(removed.centrifuge.key, "sensor-1");
+  assert.equal(removed.payload, null);
+  assert.deepEqual((await ack2).msg, { action: "map_remove", channel: "kv:board", key: "sensor-1" });
+});

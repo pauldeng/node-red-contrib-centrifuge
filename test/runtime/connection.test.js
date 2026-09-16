@@ -168,6 +168,44 @@ test("server-side subscriptions: channels claim, filter status, conflict with a 
   );
 });
 
+test("map subscription: sync then update then removal; type conflict and bogus type are rejected; dispose removes it", async (t) => {
+  const srv = await startCentrifugo();
+  t.after(() => srv.stop());
+  const conn = createConnection({ url: srv.url, secret: srv.secret });
+  t.after(() => conn.close());
+  conn.connect();
+  await srv.api("map_publish", { channel: "kv:board", key: "a", data: { n: 1 } });
+
+  const c = consumer(false);
+  const dispose = conn.subscribe("kv:board", c, { type: "map" });
+  const sync = await c.events.until((e) => e.event === "sync");
+  assert.equal(sync.entries.length, 1);
+  assert.equal(sync.entries[0].key, "a");
+  assert.deepEqual(sync.entries[0].data, { n: 1 });
+
+  await srv.api("map_publish", { channel: "kv:board", key: "b", data: { n: 2 } });
+  const updated = await c.events.until((e) => e.event === "update" && e.key === "b");
+  assert.deepEqual(updated.data, { n: 2 });
+  assert.equal(updated.removed, undefined);
+
+  await srv.api("map_remove", { channel: "kv:board", key: "a" });
+  const removed = await c.events.until((e) => e.event === "update" && e.key === "a");
+  assert.equal(removed.removed, true);
+  assert.equal(removed.data, undefined);
+
+  assert.throws(
+    () => conn.subscribe("kv:board", consumer(false)),
+    (e) => e.code === "INVALID_CONFIG" && /subscription type differs from the existing subscription/.test(e.message),
+  );
+  assert.throws(
+    () => conn.subscribe("kv:other", consumer(false), { type: "bogus" }),
+    (e) => e.code === "INVALID_CONFIG" && /type must be stream, map, map_clients or map_users/.test(e.message),
+  );
+
+  dispose();
+  assert.equal(conn.client.getMapSubscription("kv:board"), null, "last consumer removes the map subscription");
+});
+
 test("joinLeave: one shared subscription, per-consumer filtering, no recreate when a consumer opts in", async (t) => {
   const srv = await startCentrifugo();
   t.after(() => srv.stop());
@@ -197,4 +235,66 @@ test("joinLeave: one shared subscription, per-consumer filtering, no recreate wh
     0,
     "consumer without joinLeave gets none",
   );
+});
+
+test("late map consumers receive the current snapshot without restarting the shared subscription", async (t) => {
+  const srv = await startCentrifugo();
+  let conn = null;
+  t.after(async () => {
+    conn?.close();
+    await srv.stop();
+  });
+  conn = createConnection({ url: srv.url, secret: srv.secret });
+  const channel = "kv:late-snapshot";
+  await srv.api("map_publish", { channel, key: "keep", data: { n: 1 } });
+  await srv.api("map_publish", { channel, key: "remove", data: 0 });
+  const first = consumer(false);
+  conn.subscribe(channel, first, { type: "map" });
+  conn.connect();
+  const initial = await first.events.until((e) => e.event === "sync");
+  const sub = conn.client.getMapSubscription(channel);
+  await srv.api("map_publish", { channel, key: "keep", data: { n: 2 } });
+  const update = await first.events.until((e) => e.event === "update" && e.key === "keep");
+  await srv.api("map_remove", { channel, key: "remove" });
+  await first.events.until((e) => e.event === "update" && e.removed);
+  // A consumer must not be able to corrupt the snapshot saved for future consumers.
+  initial.entries[0].data = "mutated";
+  update.data.n = 999;
+  const second = consumer(false);
+  conn.subscribe(channel, second, { type: "map" });
+  const snapshot = await second.events.until((e) => e.event === "sync");
+  assert.deepEqual(
+    snapshot.entries.map((e) => [e.key, e.data]),
+    [["keep", { n: 2 }]],
+  );
+  assert.equal(conn.client.getMapSubscription(channel), sub);
+  assert.equal(first.events.seen.filter((e) => e.event === "sync").length, 1);
+  snapshot.entries[0].data.n = 888;
+  const third = consumer(false);
+  conn.subscribe(channel, third, { type: "map" });
+  assert.equal((await third.events.until((e) => e.event === "sync")).entries[0].data.n, 2);
+
+  // Joining during an outage gets the last known state, then the SDK's recovered updates.
+  conn.client.disconnect();
+  const offline = consumer(false);
+  conn.subscribe(channel, offline, { type: "map" });
+  assert.equal((await offline.events.until((e) => e.event === "sync")).entries[0].data.n, 2);
+  await srv.api("map_remove", { channel, key: "keep" });
+  await srv.api("map_publish", { channel, key: "fresh", data: false });
+  const { once } = require("node:events");
+  const recovered = once(sub, "subscribed", { signal: AbortSignal.timeout(5000) });
+  conn.client.connect();
+  assert.equal((await recovered)[0].recovered, true);
+  await offline.events.until((e) => e.event === "update" && e.key === "fresh");
+  const afterRecovery = consumer(false);
+  conn.subscribe(channel, afterRecovery, { type: "map" });
+  assert.deepEqual(
+    (await afterRecovery.events.until((e) => e.event === "sync")).entries.map((e) => [e.key, e.data]),
+    [["fresh", false]],
+  );
+  await srv.api("map_remove", { channel, key: "fresh" });
+  await afterRecovery.events.until((e) => e.event === "update" && e.removed);
+  const empty = consumer(false);
+  conn.subscribe(channel, empty, { type: "map" });
+  assert.deepEqual((await empty.events.until((e) => e.event === "sync")).entries, []);
 });

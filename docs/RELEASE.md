@@ -17,7 +17,7 @@ maintainer from their own terminal, never from an agent session or CI.
    - Allowed actions: enable direct publishing with `npm publish`. This workflow publishes directly and requires that permission; stage-only permissions are incompatible with it. See the [npm trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/).
      npm does not verify the tuple when you save it; a typo only shows up as a failed release.
 5. Still in Settings, set publishing access to "Require two-factor authentication and disallow tokens". Trusted publishers keep working; classic tokens stop.
-6. Protect `main` on GitHub: require the CI checks to pass before merging. A solo maintainer needs no required reviewers.
+6. Protect `main` on GitHub with a branch ruleset: require a pull request before merging, require the CI checks to pass, block force pushes and deletions. A solo maintainer needs no required reviewers.
 7. Submit the package to the Flow Library at https://flows.nodered.org/add/node once the first version is on npm.
 
 ## Every release after that

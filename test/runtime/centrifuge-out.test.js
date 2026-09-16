@@ -33,6 +33,17 @@ async function observe(channel) {
   return { client, sub };
 }
 
+// A raw SDK map observer (Centrifugo experimental map subscriptions): "update" carries { key, data } for a set,
+// or { key, removed: true } for a removal; a "sync" fires once after subscribe with the current entries.
+async function observeMap(channel) {
+  const client = new Centrifuge(srv.url, { token: connectionToken({ secret: srv.secret, sub: "observer" }) });
+  const sub = client.newMapSubscription(channel);
+  sub.subscribe();
+  client.connect();
+  await once(sub, "subscribed");
+  return { client, sub };
+}
+
 const server1 = (overrides = {}) => ({
   id: "srv1",
   type: "centrifuge-server",
@@ -89,6 +100,16 @@ const debugErr = () => ({
   wires: [],
 });
 const tab = () => ({ id: "f1", type: "tab", label: "test" });
+// An inject that also sets msg.key (used by the map-mode tests); omit `key` for a message with no key property.
+const injectKey = (id, { payload = "1", payloadType = "json", key, wires }) => ({
+  id,
+  type: "inject",
+  z: "f1",
+  props: [{ p: "payload" }, ...(key === undefined ? [] : [{ p: "key", v: key, vt: "str" }])],
+  payload,
+  payloadType,
+  wires: [[wires]],
+});
 const out = (id, overrides = {}) => ({
   id,
   type: "centrifuge-out",
@@ -324,6 +345,96 @@ test("out1: stalled asynchronous context lookup times out and does not block par
   assert.ok(!contextNr.lines.slice(beforeClose).some((line) => /Error stopping node|node is closing/.test(line)));
 });
 
+test("out1: map publish/remove, permission denial, missing key, str-typed key selector", async (t) => {
+  const flow = [
+    server1(),
+    injectKey("injMapPub", { payload: "42", payloadType: "num", key: "score", wires: "outMapPub" }),
+    injectKey("injMapRemove", { key: "score", wires: "outMapRemove" }),
+    injectKey("injRo", { key: "score", wires: "outRo" }),
+    injectKey("injMissingKey", { wires: "outMissingKey" }),
+    injectKey("injEmptyKey", { key: "", wires: "outMissingKey" }),
+    injectKey("injStrKey", { payload: "viaStrKey", payloadType: "str", wires: "outStrKey" }),
+    out("outMapPub", { channel: "kv:board", channelType: "str", mode: "map_publish", wires: [["dbg1"]] }),
+    out("outMapRemove", { channel: "kv:board", channelType: "str", mode: "map_remove", wires: [["dbg1"]] }),
+    out("outRo", { channel: "ro:board", channelType: "str", mode: "map_publish", wires: [["dbg1"]] }),
+    out("outMissingKey", { channel: "kv:board", channelType: "str", mode: "map_publish", wires: [["dbg1"]] }),
+    out("outStrKey", {
+      channel: "kv:board",
+      channelType: "str",
+      mode: "map_publish",
+      key: "fixedKey",
+      keyType: "str",
+      wires: [["dbg1"]],
+    }),
+    debugFull("dbg1"),
+    catchNode(["outMapPub", "outMapRemove", "outRo", "outMissingKey", "outStrKey"]),
+    debugErr(),
+    tab(),
+  ];
+  const connected = nr.waitForStatus("outMapPub", (s) => s.text === "connected");
+  await nr.deploy(flow);
+  await connected;
+
+  const observer = await observeMap("kv:board");
+  t.after(() => observer.client.disconnect());
+
+  // (1) map_publish reaches a raw map observer as an update with the key/data, and forwards msg.centrifuge
+  {
+    const upd = once(observer.sub, "update");
+    const dbg = nr.waitForDebug((d) => d.id === "dbg1");
+    await nr.inject("injMapPub");
+    const [ctx] = await upd;
+    assert.equal(ctx.key, "score");
+    assert.equal(ctx.data, 42);
+    const msg = (await dbg).msg;
+    assert.deepEqual(msg.centrifuge, { action: "map_publish", channel: "kv:board", key: "score" });
+  }
+
+  // (2) map_remove reaches the observer as an update with removed: true, and forwards msg.centrifuge
+  {
+    const upd = once(observer.sub, "update");
+    const dbg = nr.waitForDebug((d) => d.id === "dbg1");
+    await nr.inject("injMapRemove");
+    const [ctx] = await upd;
+    assert.equal(ctx.key, "score");
+    assert.equal(ctx.removed, true);
+    const msg = (await dbg).msg;
+    assert.deepEqual(msg.centrifuge, { action: "map_remove", channel: "kv:board", key: "score" });
+  }
+
+  // (3) a read-only map namespace refuses the write with PERMISSION_DENIED (server code 103)
+  {
+    const caught = nr.waitForDebug((d) => d.id === "dbgerr1");
+    await nr.inject("injRo");
+    const err = (await caught).msg;
+    assert.equal(err.code, "PERMISSION_DENIED");
+    assert.match(err.message, /103/);
+  }
+
+  // (4) missing/empty key fails locally with INVALID_MESSAGE; nothing is written
+  for (const id of ["injMissingKey", "injEmptyKey"]) {
+    const caught = nr.waitForDebug((d) => d.id === "dbgerr1");
+    const noUpdate = assert.rejects(once(observer.sub, "update", { signal: AbortSignal.timeout(300) }));
+    await nr.inject(id);
+    const err = (await caught).msg;
+    assert.equal(err.code, "INVALID_MESSAGE", id);
+    assert.match(err.message, /key/, id);
+    await noUpdate;
+  }
+
+  // (5) a str-typed key selector ignores msg.key and still writes the configured key
+  {
+    const upd = once(observer.sub, "update");
+    const dbg = nr.waitForDebug((d) => d.id === "dbg1");
+    await nr.inject("injStrKey");
+    const [ctx] = await upd;
+    assert.equal(ctx.key, "fixedKey");
+    assert.equal(ctx.data, "viaStrKey");
+    const msg = (await dbg).msg;
+    assert.deepEqual(msg.centrifuge, { action: "map_publish", channel: "kv:board", key: "fixedKey" });
+  }
+});
+
 test("out1: timeout while reconnecting fails with TIMEOUT within the configured deadline", async (t) => {
   const srv2 = await startCentrifugo();
   t.after(() => srv2.stop());
@@ -352,4 +463,26 @@ test("out1: timeout while reconnecting fails with TIMEOUT within the configured 
   const elapsed = Date.now() - start;
   assert.equal(err.code, "TIMEOUT");
   assert.ok(elapsed >= 900 && elapsed < 3000, `elapsed was ${elapsed}ms`);
+});
+
+test("map removal at the old preflight boundary is rejected and the connection stays usable", async () => {
+  const flow = [
+    server1({ maxMessageSize: 1024 }),
+    injectKey("injLarge", { key: "k".repeat(956), wires: "remove1" }),
+    injectKey("injSmall", { key: "score", wires: "remove1" }),
+    out("remove1", { mode: "map_remove", channel: "kv:board", channelType: "str", wires: [["dbg1"]] }),
+    debugFull("dbg1"),
+    catchNode(["remove1"]),
+    debugErr(),
+    tab(),
+  ];
+  const connected = nr.waitForStatus("remove1", (s) => s.text === "connected");
+  await nr.deploy(flow);
+  await connected;
+  const refused = nr.waitForDebug((d) => d.id === "dbgerr1");
+  await nr.inject("injLarge");
+  assert.equal((await refused).msg.code, "INVALID_MESSAGE");
+  const ack = nr.waitForDebug((d) => d.id === "dbg1");
+  await nr.inject("injSmall");
+  assert.deepEqual((await ack).msg.centrifuge, { action: "map_remove", channel: "kv:board", key: "score" });
 });

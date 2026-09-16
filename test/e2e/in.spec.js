@@ -38,6 +38,9 @@ test("in dialog: mode rows, persistence, channel validator", async ({ page, nr }
   await E.gotoEditor(page, nr, "light");
   await E.openNode(page, "in1");
 
+  // five mode options: subscribe, server-side, and the three map modes
+  await expect(page.locator("#node-input-mode option")).toHaveCount(5);
+
   // subscribe mode: channel/joinLeave/subscriptionAuth rows all shown
   await expect(page.locator("#node-input-channel")).toBeVisible();
   await expect(page.locator("#node-input-joinLeave")).toBeVisible();
@@ -46,16 +49,44 @@ test("in dialog: mode rows, persistence, channel validator", async ({ page, nr }
   await expect(page.locator("#centrifuge-in-channel-hint")).toBeHidden();
   await expect(page.locator("#centrifuge-in-channel-label")).toHaveText("Channel");
 
-  // server mode: subscriptionAuth row hides, channel stays visible/editable as a filter
+  // server mode: subscriptionAuth row hides, channel stays visible/editable as a filter, join/leave stays shown
   await page.selectOption("#node-input-mode", "server");
   await expect(page.locator("#centrifuge-in-row-auth")).toBeHidden();
+  await expect(page.locator("#centrifuge-in-row-joinleave")).toBeVisible();
   await expect(page.locator("#centrifuge-in-channel-hint")).toBeVisible();
   await expect(page.locator("#centrifuge-in-channel-label")).toHaveText("Filter");
   await expect(page.locator("#node-input-channel")).toBeVisible();
   await expect(page.locator("#node-input-channel")).toBeEditable();
 
+  // map mode: join/leave row hides (server-managed), auth row and channel (labelled "Channel") stay
+  await page.selectOption("#node-input-mode", "map");
+  await expect(page.locator("#centrifuge-in-row-joinleave")).toBeHidden();
+  await expect(page.locator("#centrifuge-in-row-auth")).toBeVisible();
+  await expect(page.locator("#centrifuge-in-channel-hint")).toBeHidden();
+  await expect(page.locator("#centrifuge-in-channel-label")).toHaveText("Channel");
+
+  // map mode requires a non-empty channel, same as subscribe mode
+  await page.fill("#node-input-channel", "");
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#node-input-channel")).toHaveClass(/input-error/);
+  await page.fill("#node-input-channel", "kv:board");
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#node-input-channel")).not.toHaveClass(/input-error/);
+
+  // save in map mode: mode persists and the label follows the "map: <channel>" rule
+  await expect(page.locator(".red-ui-tray-content .input-error")).toHaveCount(0);
+  await E.closeDialog(page);
+  const label = await page.evaluate(() => RED.nodes.node("in1")._def.label.call(RED.nodes.node("in1")));
+  expect(label).toBe("map: kv:board");
+
+  await E.openNode(page, "in1");
+  await expect(page.locator("#node-input-mode")).toHaveValue("map");
+  await expect(page.locator("#node-input-channel")).toHaveValue("kv:board");
+  await expect(page.locator("#centrifuge-in-row-joinleave")).toBeHidden();
+
   // back to subscribe mode with the values under test
   await page.selectOption("#node-input-mode", "subscribe");
+  await expect(page.locator("#centrifuge-in-row-joinleave")).toBeVisible();
   await page.fill("#node-input-channel", "news");
   await page.check("#node-input-joinLeave");
   await page.selectOption("#node-input-subscriptionAuth", "hmac");
